@@ -5,7 +5,7 @@ agent backends that renders the agent's generative-UI surfaces ([A2UI v0.9](http
 inline using a [genui](https://pub.dev/packages/genui) catalog of your own
 Flutter widgets.
 
-![agentic_client example screenshot](assets/dart_cilent.png)
+![agentic_client example screenshot](assets/dart_client.png)
 
 ## Features
 
