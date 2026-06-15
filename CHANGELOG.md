@@ -1,3 +1,7 @@
+## 0.0.6
+
+* Added inline AGUI events to UI
+
 ## 0.0.5
 
 * Added support for standard AGUI backends
