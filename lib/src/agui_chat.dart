@@ -34,6 +34,7 @@ class AguiChat extends StatefulWidget {
     this.emptyStateSendButtonLabel = 'Send',
     this.uiRenderToolNames = const {},
     this.markdownA2uiLangTag,
+    this.showAgentEvents = false,
     super.key,
   });
 
@@ -81,6 +82,11 @@ class AguiChat extends StatefulWidget {
   /// disables this path.
   final String? markdownA2uiLangTag;
 
+  /// When true, AG-UI lifecycle events (tool calls, surface renders, etc.)
+  /// are shown inline in the chat as small step rows, so the user sees what
+  /// is happening instead of just a loader. Defaults to false.
+  final bool showAgentEvents;
+
   @override
   State<AguiChat> createState() => _AguiChatState();
 }
@@ -111,6 +117,12 @@ class _SurfaceItem extends _ChatItem {
   final String surfaceId;
 }
 
+class _EventItem extends _ChatItem {
+  const _EventItem(this.text);
+
+  final String text;
+}
+
 // ─── State ──────────────────────────────────────────────────────────────────
 
 class _AguiChatState extends State<AguiChat> {
@@ -134,6 +146,14 @@ class _AguiChatState extends State<AguiChat> {
     );
     _conversation = Conversation(controller: _controller, transport: _transport);
     _conversation.events.listen(_onEvent);
+    if (widget.showAgentEvents) {
+      _transport.agentEvents.listen(_onAgentEvent);
+    }
+  }
+
+  void _onAgentEvent(String text) {
+    setState(() => _items.add(_EventItem(text)));
+    _scrollToEnd();
   }
 
   @override
@@ -253,6 +273,7 @@ class _AguiChatState extends State<AguiChat> {
                 _UserBubble(:final text) => _Bubble(text: text, fromUser: true),
                 _AssistantBubble(:final text) => _Bubble(text: text, fromUser: false),
                 _SurfaceItem(:final surfaceId) => _SurfaceBubble(surfaceContext: _controller.contextFor(surfaceId)),
+                _EventItem(:final text) => _EventRow(text: text),
               };
             },
           ),
@@ -322,6 +343,35 @@ class _SurfaceBubble extends StatelessWidget {
           borderRadius: BorderRadius.circular(12),
         ),
         child: Surface(surfaceContext: surfaceContext),
+      ),
+    );
+  }
+}
+
+class _EventRow extends StatelessWidget {
+  const _EventRow({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final mutedColor = theme.colorScheme.onSurface.withValues(alpha: 0.55);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Icon(Icons.circle, size: 6, color: mutedColor),
+          const SizedBox(width: 10),
+          Flexible(
+            child: Text(
+              text,
+              style: theme.textTheme.bodySmall?.copyWith(color: mutedColor, fontStyle: FontStyle.italic),
+            ),
+          ),
+        ],
       ),
     );
   }

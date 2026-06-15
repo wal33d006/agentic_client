@@ -14,9 +14,18 @@ Flutter widgets.
   it a `baseUrl` and a `Catalog`.
 - **Streamed assistant text** rendered as chat bubbles with a thinking
   indicator while a turn is in flight.
-- **Generative UI inline**: A2UI surfaces emitted by the agent (tagged inside
-  AG-UI `TOOL_CALL_RESULT` events) are unpacked and rendered with the catalog
-  widgets you provide.
+- **Generative UI inline** via three configurable ingest paths:
+  1. **Tool-result envelope** (default): A2UI ops in `TOOL_CALL_RESULT.content`
+     under an `a2ui_operations` array (the CopilotKit convention).
+  2. **Ghost tool-call args** (`uiRenderToolNames`): the ops live in
+     `TOOL_CALL_ARGS` for a synthetic UI-render tool; the client absorbs the
+     call and synthesizes a tool result back into history.
+  3. **Markdown fence intercept** (`markdownA2uiLangTag`): fenced code blocks
+     with a configurable lang tag are stripped out of assistant text and
+     parsed as A2UI ops.
+- **Inline agent-event steps** (`showAgentEvents: true`): show small italic
+  step rows like "Calling render_ui_widget…" / "Rendering 4 components" as
+  the agent works, instead of a single loader spinner.
 
 [SurfaceController]: https://pub.dev/documentation/genui/latest/genui/SurfaceController-class.html
 

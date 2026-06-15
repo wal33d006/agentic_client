@@ -48,6 +48,7 @@ class _ChatScreen extends StatelessWidget {
         emptyStateSendButtonLabel: 'Create',
         hintText: 'Build me 3 fast food vendor cards',
         sendButtonLabel: 'Send',
+        showAgentEvents: true,
       ),
     );
   }

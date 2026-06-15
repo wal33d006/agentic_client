@@ -51,6 +51,12 @@ class AgUiTransport implements Transport {
   final agui.AgUiClient _client;
   final _textCtrl = StreamController<String>.broadcast();
   final _msgCtrl = StreamController<A2uiMessage>.broadcast();
+  final _eventCtrl = StreamController<String>.broadcast();
+
+  /// High-level lifecycle events emitted during a turn — one short phrase per
+  /// step (tool calls, surface renders, etc.). UIs can subscribe and show
+  /// these inline instead of a single loader.
+  Stream<String> get agentEvents => _eventCtrl.stream;
 
   /// Stable per-conversation IDs — keeps the backend's checkpointer happy.
   final String _threadId = 'thread_${DateTime.now().millisecondsSinceEpoch}';
@@ -126,6 +132,10 @@ class AgUiTransport implements Transport {
                 '[agui] markdown-fence intercept: '
                 '${fencedJsonBlocks.length} block(s) extracted',
               );
+              _eventCtrl.add(
+                'Extracted ${fencedJsonBlocks.length} UI '
+                'block${fencedJsonBlocks.length == 1 ? '' : 's'} from response',
+              );
             }
           }
           if (text.isNotEmpty) {
@@ -146,6 +156,7 @@ class AgUiTransport implements Transport {
           toolNamesById[e.toolCallId] = e.toolCallName;
           toolArgsById[e.toolCallId] = StringBuffer();
           debugPrint('[agui] ← tool-call start: ${e.toolCallName} id=${e.toolCallId}');
+          _eventCtrl.add('Calling ${e.toolCallName}…');
         case agui.EventType.toolCallArgs:
           final e = event as agui.ToolCallArgsEvent;
           toolArgsById.putIfAbsent(e.toolCallId, StringBuffer.new).write(e.delta);
@@ -250,13 +261,38 @@ class AgUiTransport implements Transport {
     final tagged = {'version': 'v0.9', ...op};
     try {
       _msgCtrl.add(A2uiMessage.fromJson(tagged));
+      _eventCtrl.add(_friendlyOpLabel(op));
     } catch (err, st) {
       // Surface validation errors as a chat bubble so they're visible.
       // Continue with the rest of the ops — one malformed component
       // shouldn't drop the whole surface.
       final hint = _diagnoseBadOp(op);
       _textCtrl.add('⚠️ A2UI parse error: $err${hint == null ? "" : "\n$hint"}');
+      _eventCtrl.add('⚠️ A2UI parse error');
       debugPrint('[agui] A2UI parse failed for op $op\n$st');
+    }
+  }
+
+  String _friendlyOpLabel(Map<String, dynamic> op) {
+    switch (_opKind(op)) {
+      case 'createSurface':
+        return 'Creating surface…';
+      case 'updateComponents':
+        final body = op['updateComponents'];
+        if (body is Map) {
+          final components = body['components'];
+          if (components is List) {
+            return 'Rendering ${components.length} '
+                'component${components.length == 1 ? '' : 's'}';
+          }
+        }
+        return 'Rendering UI';
+      case 'deleteSurface':
+        return 'Removing surface';
+      case 'updateData':
+        return 'Updating data';
+      default:
+        return 'Applying UI change';
     }
   }
 
@@ -344,6 +380,7 @@ class AgUiTransport implements Transport {
   void dispose() {
     _textCtrl.close();
     _msgCtrl.close();
+    _eventCtrl.close();
     _client.close();
   }
 }
