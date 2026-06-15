@@ -1,3 +1,7 @@
+## 0.0.7
+
+* Added support for shared state between agent and UI
+
 ## 0.0.6
 
 * Added inline AGUI events to UI

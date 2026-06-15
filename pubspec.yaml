@@ -1,6 +1,6 @@
 name: agentic_client
 description: "Dart chat client for rendering A2UI widgets over AGUI protocol"
-version: 0.0.6
+version: 0.0.7
 homepage: https://github.com/wal33d006/agentic_client
 
 environment:
