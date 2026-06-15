@@ -12,14 +12,14 @@ import 'package:flutter/material.dart';
 import 'package:genui/genui.dart';
 import 'package:json_schema_builder/json_schema_builder.dart';
 
-const exampleCatalogId = 'agentic_client.example.catalog';
+const exampleCatalogId = 'copilotkit://app-dashboard-catalog';
 
 /// Free-text spec the agent reads (via AG-UI `context`) to know which
 /// components it can emit. Keep it verbose — the secondary LLM uses it
 /// verbatim as a system prompt.
 const exampleCatalogDescription = '''
 You are emitting A2UI v0.9 operations for a Flutter client whose catalogId is
-"agentic_client.example.catalog".
+"copilotkit://app-dashboard-catalog".
 
 ═══════════ WIRE FORMAT ═══════════
 
@@ -94,18 +94,15 @@ Three product cards in a row:
 
 /// Builds the catalog at startup.
 Catalog buildExampleCatalog() {
-  return Catalog(
-    [
-      BasicCatalogItems.text,
-      BasicCatalogItems.column,
-      BasicCatalogItems.row,
-      BasicCatalogItems.divider,
-      _productCard,
-      _weatherTile,
-      _stat,
-    ],
-    catalogId: exampleCatalogId,
-  );
+  return Catalog([
+    BasicCatalogItems.text,
+    BasicCatalogItems.column,
+    BasicCatalogItems.row,
+    BasicCatalogItems.divider,
+    _productCard,
+    _weatherTile,
+    _stat,
+  ], catalogId: exampleCatalogId);
 }
 
 // ─── ProductCard ────────────────────────────────────────────────────────────
@@ -156,10 +153,8 @@ final _productCard = CatalogItem(
                                 child: Image.network(
                                   imageUrl,
                                   fit: BoxFit.cover,
-                                  errorBuilder: (_, __, ___) => Container(
-                                    color: Colors.black12,
-                                    child: const Icon(Icons.image_not_supported),
-                                  ),
+                                  errorBuilder: (_, __, ___) =>
+                                      Container(color: Colors.black12, child: const Icon(Icons.image_not_supported)),
                                 ),
                               ),
                             Padding(
@@ -186,13 +181,10 @@ final _productCard = CatalogItem(
                                   const SizedBox(height: 8),
                                   Text(
                                     price ?? '',
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .titleMedium
-                                        ?.copyWith(
-                                          color: Theme.of(context).colorScheme.primary,
-                                          fontWeight: FontWeight.w700,
-                                        ),
+                                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                      color: Theme.of(context).colorScheme.primary,
+                                      fontWeight: FontWeight.w700,
+                                    ),
                                   ),
                                 ],
                               ),
@@ -260,29 +252,15 @@ final _weatherTile = CatalogItem(
                       const SizedBox(height: 12),
                       Text(
                         city ?? '',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 14,
-                          fontWeight: FontWeight.w500,
-                        ),
+                        style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w500),
                       ),
                       const SizedBox(height: 4),
                       Text(
                         temperature ?? '',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 28,
-                          fontWeight: FontWeight.w700,
-                        ),
+                        style: const TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.w700),
                       ),
                       if (condition != null && condition.isNotEmpty)
-                        Text(
-                          condition,
-                          style: const TextStyle(
-                            color: Colors.white70,
-                            fontSize: 12,
-                          ),
-                        ),
+                        Text(condition, style: const TextStyle(color: Colors.white70, fontSize: 12)),
                     ],
                   ),
                 );
@@ -314,10 +292,7 @@ IconData _weatherIcon(String? condition) {
 
 final _statSchema = S.object(
   description: 'A KPI readout: large value with a small label below.',
-  properties: {
-    'label': A2uiSchemas.stringReference(),
-    'value': A2uiSchemas.stringReference(),
-  },
+  properties: {'label': A2uiSchemas.stringReference(), 'value': A2uiSchemas.stringReference()},
   required: ['label', 'value'],
 );
 
@@ -346,15 +321,10 @@ final _stat = CatalogItem(
                 children: [
                   Text(
                     value ?? '',
-                    style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                          fontWeight: FontWeight.w700,
-                        ),
+                    style: Theme.of(context).textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.w700),
                   ),
                   const SizedBox(height: 2),
-                  Text(
-                    label ?? '',
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
+                  Text(label ?? '', style: Theme.of(context).textTheme.bodySmall),
                 ],
               ),
             );

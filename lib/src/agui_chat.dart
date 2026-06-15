@@ -32,6 +32,8 @@ class AguiChat extends StatefulWidget {
     this.sendButtonLabel = 'Send',
     this.emptyStateTitle,
     this.emptyStateSendButtonLabel = 'Send',
+    this.uiRenderToolNames = const {},
+    this.markdownA2uiLangTag,
     super.key,
   });
 
@@ -65,6 +67,19 @@ class AguiChat extends StatefulWidget {
   /// message is sent). Use this to set a call-to-action like "Create" while
   /// the in-conversation button reads "Send".
   final String emptyStateSendButtonLabel;
+
+  /// Tool names whose ARGS carry an A2UI payload (the "ghost tool call"
+  /// pattern). When the agent emits a tool call with one of these names, its
+  /// args JSON is parsed as A2UI ops and a synthesized tool result is
+  /// recorded in history.
+  final Set<String> uiRenderToolNames;
+
+  /// Fenced code-block language tag to intercept inside assistant text. When
+  /// set (e.g. `'a2ui'`), the widget extracts ```<tag> ... ``` blocks from
+  /// streamed assistant text, parses them as A2UI ops, and renders them as
+  /// surfaces; the surrounding text is shown as a normal chat bubble. Null
+  /// disables this path.
+  final String? markdownA2uiLangTag;
 
   @override
   State<AguiChat> createState() => _AguiChatState();
@@ -111,7 +126,12 @@ class _AguiChatState extends State<AguiChat> {
   void initState() {
     super.initState();
     _controller = SurfaceController(catalogs: [widget.catalog]);
-    _transport = AgUiTransport(baseUrl: widget.baseUrl, catalogDescription: widget.catalogDescription);
+    _transport = AgUiTransport(
+      baseUrl: widget.baseUrl,
+      catalogDescription: widget.catalogDescription,
+      uiRenderToolNames: widget.uiRenderToolNames,
+      markdownA2uiLangTag: widget.markdownA2uiLangTag,
+    );
     _conversation = Conversation(controller: _controller, transport: _transport);
     _conversation.events.listen(_onEvent);
   }

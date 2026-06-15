@@ -11,10 +11,7 @@ import 'package:flutter/material.dart';
 
 import 'catalog.dart';
 
-const _backendUrl = String.fromEnvironment(
-  'AGENT_URL',
-  defaultValue: 'https://cardiac-pork-physical-medium.trycloudflare.com',
-);
+const _backendUrl = String.fromEnvironment('AGENT_URL', defaultValue: 'http://localhost:8123');
 
 void main() {
   runApp(const ExampleApp());
