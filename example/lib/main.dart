@@ -26,14 +26,11 @@ class ExampleApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'agentic_client example',
+      debugShowCheckedModeBanner: false,
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo),
         useMaterial3: true,
-        inputDecorationTheme: const InputDecorationTheme(
-          border: OutlineInputBorder(),
-          isDense: true,
-        ),
+        inputDecorationTheme: const InputDecorationTheme(border: OutlineInputBorder(), isDense: true),
       ),
       home: const _ChatScreen(),
     );
@@ -46,12 +43,14 @@ class _ChatScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('agentic_client example')),
       body: AguiChat(
         baseUrl: _backendUrl,
         catalog: buildExampleCatalog(),
         catalogDescription: exampleCatalogDescription,
-        hintText: 'Try: "show me 3 products" or "weather for Paris"',
+        emptyStateTitle: 'What would you like to build?',
+        emptyStateSendButtonLabel: 'Create',
+        hintText: 'Build me 3 fast food vendor cards',
+        sendButtonLabel: 'Send',
       ),
     );
   }

@@ -30,6 +30,8 @@ class AguiChat extends StatefulWidget {
     this.catalogDescription,
     this.hintText = 'Type a message…',
     this.sendButtonLabel = 'Send',
+    this.emptyStateTitle,
+    this.emptyStateSendButtonLabel = 'Send',
     super.key,
   });
 
@@ -52,8 +54,17 @@ class AguiChat extends StatefulWidget {
   /// Placeholder for the text input.
   final String hintText;
 
-  /// Label for the send button.
+  /// Label for the send button while a conversation is in progress.
   final String sendButtonLabel;
+
+  /// Optional headline shown above a centered input when the conversation has
+  /// no messages yet. If null, the chat opens directly into the bubble list.
+  final String? emptyStateTitle;
+
+  /// Label for the send button shown in the empty state (before the first
+  /// message is sent). Use this to set a call-to-action like "Create" while
+  /// the in-conversation button reads "Send".
+  final String emptyStateSendButtonLabel;
 
   @override
   State<AguiChat> createState() => _AguiChatState();
@@ -69,16 +80,19 @@ sealed class _ChatItem {
 
 class _UserBubble extends _ChatItem {
   const _UserBubble(this.text);
+
   final String text;
 }
 
 class _AssistantBubble extends _ChatItem {
   const _AssistantBubble(this.text);
+
   final String text;
 }
 
 class _SurfaceItem extends _ChatItem {
   const _SurfaceItem(this.surfaceId);
+
   final String surfaceId;
 }
 
@@ -97,14 +111,8 @@ class _AguiChatState extends State<AguiChat> {
   void initState() {
     super.initState();
     _controller = SurfaceController(catalogs: [widget.catalog]);
-    _transport = AgUiTransport(
-      baseUrl: widget.baseUrl,
-      catalogDescription: widget.catalogDescription,
-    );
-    _conversation = Conversation(
-      controller: _controller,
-      transport: _transport,
-    );
+    _transport = AgUiTransport(baseUrl: widget.baseUrl, catalogDescription: widget.catalogDescription);
+    _conversation = Conversation(controller: _controller, transport: _transport);
     _conversation.events.listen(_onEvent);
   }
 
@@ -124,15 +132,11 @@ class _AguiChatState extends State<AguiChat> {
         case ConversationContentReceived(:final text):
           _items.add(_AssistantBubble(text));
         case ConversationSurfaceAdded(:final surfaceId):
-          if (!_items.any(
-            (i) => i is _SurfaceItem && i.surfaceId == surfaceId,
-          )) {
+          if (!_items.any((i) => i is _SurfaceItem && i.surfaceId == surfaceId)) {
             _items.add(_SurfaceItem(surfaceId));
           }
         case ConversationSurfaceRemoved(:final surfaceId):
-          _items.removeWhere(
-            (i) => i is _SurfaceItem && i.surfaceId == surfaceId,
-          );
+          _items.removeWhere((i) => i is _SurfaceItem && i.surfaceId == surfaceId);
         case ConversationWaiting():
           _waiting = true;
         case ConversationError(:final error):
@@ -174,6 +178,47 @@ class _AguiChatState extends State<AguiChat> {
 
   @override
   Widget build(BuildContext context) {
+    final showEmptyState = widget.emptyStateTitle != null && _items.isEmpty && !_waiting;
+    if (showEmptyState) return _buildEmptyState(context);
+    return _buildChat(context);
+  }
+
+  Widget _buildEmptyState(BuildContext context) {
+    final theme = Theme.of(context);
+    return SafeArea(
+      child: Center(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(24),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 560),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  widget.emptyStateTitle!,
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.headlineMedium?.copyWith(
+                    color: theme.colorScheme.onSurface.withValues(alpha: 0.55),
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                const SizedBox(height: 28),
+                _PillInput(
+                  controller: _textController,
+                  hintText: widget.hintText,
+                  sendLabel: widget.emptyStateSendButtonLabel,
+                  onSend: _send,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildChat(BuildContext context) {
     return Column(
       children: [
         Expanded(
@@ -185,17 +230,9 @@ class _AguiChatState extends State<AguiChat> {
               if (i == _items.length) return const _ThinkingDots();
               final item = _items[i];
               return switch (item) {
-                _UserBubble(:final text) => _Bubble(
-                    text: text,
-                    fromUser: true,
-                  ),
-                _AssistantBubble(:final text) => _Bubble(
-                    text: text,
-                    fromUser: false,
-                  ),
-                _SurfaceItem(:final surfaceId) => _SurfaceBubble(
-                    surfaceContext: _controller.contextFor(surfaceId),
-                  ),
+                _UserBubble(:final text) => _Bubble(text: text, fromUser: true),
+                _AssistantBubble(:final text) => _Bubble(text: text, fromUser: false),
+                _SurfaceItem(:final surfaceId) => _SurfaceBubble(surfaceContext: _controller.contextFor(surfaceId)),
               };
             },
           ),
@@ -204,31 +241,7 @@ class _AguiChatState extends State<AguiChat> {
           top: false,
           child: Padding(
             padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-            child: Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _textController,
-                    onSubmitted: (_) => _send(),
-                    // Use the consumer's bodyLarge style — Flutter's TextField
-                    // otherwise falls back to titleMedium/subtitle1, which is
-                    // a *title* style and often has a brand color baked in.
-                    style: Theme.of(context).textTheme.bodyLarge,
-                    decoration: InputDecoration(
-                      hintText: widget.hintText,
-                      isDense: true,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                // ElevatedButton works on both M2 and M3 themes — picks up
-                // the themed primary color in both.
-                ElevatedButton(
-                  onPressed: _send,
-                  child: Text(widget.sendButtonLabel),
-                ),
-              ],
-            ),
+            child: _PillInput(controller: _textController, hintText: '', sendLabel: 'Send', onSend: _send),
           ),
         ),
       ],
@@ -294,6 +307,65 @@ class _SurfaceBubble extends StatelessWidget {
   }
 }
 
+class _PillInput extends StatelessWidget {
+  const _PillInput({required this.controller, required this.hintText, required this.sendLabel, required this.onSend});
+
+  final TextEditingController controller;
+  final String hintText;
+  final String sendLabel;
+  final VoidCallback onSend;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final buttonBg = Color.alphaBlend(scheme.onSurface.withValues(alpha: 0.08), scheme.surface);
+    return Container(
+      decoration: BoxDecoration(
+        color: scheme.surface,
+        borderRadius: BorderRadius.circular(32),
+        border: Border.all(color: theme.dividerColor),
+      ),
+      padding: const EdgeInsets.fromLTRB(20, 6, 6, 6),
+      child: Row(
+        children: [
+          Expanded(
+            child: TextField(
+              controller: controller,
+              onSubmitted: (_) => onSend(),
+              style: theme.textTheme.bodyLarge,
+              // Strip the host theme's input border — the pill container
+              // already provides the border, and an OutlineInputBorder from
+              // the host theme would draw a second visible rectangle inside.
+              decoration: InputDecoration(
+                hintText: hintText,
+                hintStyle: theme.textTheme.bodyLarge?.copyWith(color: scheme.onSurface.withValues(alpha: 0.45)),
+                border: InputBorder.none,
+                enabledBorder: InputBorder.none,
+                focusedBorder: InputBorder.none,
+                isDense: true,
+                // contentPadding: const EdgeInsets.symmetric(vertical: 14),
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          TextButton(
+            onPressed: onSend,
+            style: TextButton.styleFrom(
+              backgroundColor: buttonBg,
+              foregroundColor: scheme.onSurface,
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+              shape: const StadiumBorder(),
+              textStyle: const TextStyle(fontWeight: FontWeight.w500),
+            ),
+            child: Text(sendLabel),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _ThinkingDots extends StatelessWidget {
   const _ThinkingDots();
 
@@ -303,11 +375,7 @@ class _ThinkingDots extends StatelessWidget {
       padding: EdgeInsets.symmetric(vertical: 8, horizontal: 4),
       child: Align(
         alignment: Alignment.centerLeft,
-        child: SizedBox(
-          width: 24,
-          height: 24,
-          child: CircularProgressIndicator(strokeWidth: 2),
-        ),
+        child: SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2)),
       ),
     );
   }
