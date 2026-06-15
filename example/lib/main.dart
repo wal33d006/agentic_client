@@ -6,6 +6,8 @@
 /// `http://localhost:8123`.
 library;
 
+import 'dart:convert';
+
 import 'package:agentic_client/agentic_client.dart';
 import 'package:flutter/material.dart';
 
@@ -34,21 +36,105 @@ class ExampleApp extends StatelessWidget {
   }
 }
 
-class _ChatScreen extends StatelessWidget {
+class _ChatScreen extends StatefulWidget {
   const _ChatScreen();
+
+  @override
+  State<_ChatScreen> createState() => _ChatScreenState();
+}
+
+class _ChatScreenState extends State<_ChatScreen> {
+  Map<String, dynamic> _agentState = const {};
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: AguiChat(
-        baseUrl: _backendUrl,
-        catalog: buildExampleCatalog(),
-        catalogDescription: exampleCatalogDescription,
-        emptyStateTitle: 'What would you like to build?',
-        emptyStateSendButtonLabel: 'Create',
-        hintText: 'Show me some products and tell me about the weather',
-        sendButtonLabel: 'Send',
-        showAgentEvents: true,
+      body: Column(
+        children: [
+          _StateStrip(state: _agentState),
+          Expanded(
+            child: AguiChat(
+              baseUrl: _backendUrl,
+              catalog: buildExampleCatalog(),
+              catalogDescription: exampleCatalogDescription,
+              emptyStateTitle: 'What would you like to build?',
+              emptyStateSendButtonLabel: 'Create',
+              hintText: 'Show me some products and tell me about the weather',
+              sendButtonLabel: 'Send',
+              // showAgentEvents: true,
+              // The backend's ActionMiddleware emits A2UI ops via
+              // `manually_emit_tool_call` named `emit_ui_update`. Registering
+              // the name here makes the transport unwrap its args as A2UI
+              // operations (instead of treating it as a normal tool call).
+              uiRenderToolNames: const {'emit_ui_update'},
+              onStateChanged: (s) => setState(() => _agentState = s),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// A thin debug strip that shows the agent's shared state mirror.
+///
+/// Hidden when the mirror has nothing interesting to show. The conversation
+/// `messages` array and CopilotKit/AG-UI bookkeeping are filtered out: the
+/// chat itself already shows the conversation, and dumping it as JSON
+/// would overflow the screen.
+class _StateStrip extends StatelessWidget {
+  const _StateStrip({required this.state});
+
+  final Map<String, dynamic> state;
+
+  /// Top-level keys that are bookkeeping rather than application state.
+  /// `messages` is the LangGraph conversation log (duplicates the chat);
+  /// `copilotkit` / `ag-ui` are protocol-level scaffolding.
+  static const _hiddenKeys = <String>{'messages', 'copilotkit', 'ag-ui'};
+
+  @override
+  Widget build(BuildContext context) {
+    final visible = <String, dynamic>{
+      for (final entry in state.entries)
+        if (!_hiddenKeys.contains(entry.key)) entry.key: entry.value,
+    };
+    if (visible.isEmpty) return const SizedBox.shrink();
+
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final json = const JsonEncoder.withIndent('  ').convert(visible);
+
+    return SafeArea(
+      bottom: false,
+      child: Container(
+        width: double.infinity,
+        margin: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: scheme.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: theme.dividerColor),
+        ),
+        // Cap the height so a fat state doesn't push the chat off screen;
+        // overflow scrolls inside the strip.
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxHeight: 160),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(Icons.storage, size: 16, color: scheme.onSurfaceVariant),
+              const SizedBox(width: 8),
+              Expanded(
+                child: SingleChildScrollView(
+                  child: SelectableText(
+                    json,
+                    style: theme.textTheme.bodySmall?.copyWith(fontFamily: 'monospace', color: scheme.onSurfaceVariant),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

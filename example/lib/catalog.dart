@@ -41,6 +41,23 @@ Primitives:
   Column   { children: string[] }
   Row      { children: string[] }
   Divider  {}
+  Button   { action: {event: {name: string, context?: object}}, child: string }
+
+═══════════ INTERACTION ═══════════
+
+When the user taps a Button, the client packs the action's `name` and
+`context` into `forwarded_props.pending_action` on the next run. The
+backend graph reads `state["pending_action"]` and either mutates state
+silently (e.g. "increment") or injects a synthetic HumanMessage so you
+respond (e.g. "buy").
+
+Common silent action names this backend recognizes:
+  - "increment"   → state.counter += 1
+  - "decrement"   → state.counter = max(0, state.counter - 1)
+  - "toggleTodo"  → flips state.todos[ctx.id].done
+
+Pick action names from this set when emitting Buttons. The Button's
+`child` is the id of a Text component used as the label.
 
 Custom:
   ProductCard {
@@ -61,14 +78,14 @@ Custom:
     value: string  (required, e.g. "1,284")
   }
 
-═══════════ EXAMPLE ═══════════
+═══════════ EXAMPLES ═══════════
 
-Three product cards in a row:
+(1) Three product cards in a row:
 
   { "version": "v0.9",
     "createSurface": {
       "surfaceId": "products",
-      "catalogId": "agentic_client.example.catalog"
+      "catalogId": "copilotkit://app-dashboard-catalog"
     }
   }
 
@@ -90,6 +107,51 @@ Three product cards in a row:
       ]
     }
   }
+
+(2) An interactive counter. The displayed value uses a PATH BINDING
+    (\`{ "path": "/count" }\`) into the surface's data model so it can be
+    updated without re-emitting the components. The backend bumps state on
+    each click AND emits an \`updateDataModel\` op for path \`/count\`.
+
+    Initialize the data model with \`count: 0\` via a separate
+    \`updateDataModel\` op right after \`createSurface\`. Always use
+    surfaceId="counter" for the counter (the backend's ActionMiddleware
+    targets that id by default).
+
+  { "version": "v0.9",
+    "createSurface": {
+      "surfaceId": "counter",
+      "catalogId": "copilotkit://app-dashboard-catalog"
+    }
+  }
+
+  { "version": "v0.9",
+    "updateDataModel": {
+      "surfaceId": "counter",
+      "path": "/count",
+      "value": 0
+    }
+  }
+
+  { "version": "v0.9",
+    "updateComponents": {
+      "surfaceId": "counter",
+      "components": [
+        { "id": "root", "component": "Row",
+          "children": ["dec", "val", "inc"] },
+        { "id": "dec", "component": "Button",
+          "action": { "event": { "name": "decrement" } },
+          "child": "dec-lbl" },
+        { "id": "dec-lbl", "component": "Text", "text": "−" },
+        { "id": "val", "component": "Text",
+          "text": { "path": "/count" }, "variant": "h3" },
+        { "id": "inc", "component": "Button",
+          "action": { "event": { "name": "increment" } },
+          "child": "inc-lbl" },
+        { "id": "inc-lbl", "component": "Text", "text": "+" }
+      ]
+    }
+  }
 ''';
 
 /// Builds the catalog at startup.
@@ -99,6 +161,10 @@ Catalog buildExampleCatalog() {
     BasicCatalogItems.column,
     BasicCatalogItems.row,
     BasicCatalogItems.divider,
+    // Interactive: taps fire a UserActionEvent → SurfaceController forwards
+    // it through Conversation → AgUiTransport packs it into
+    // `forwarded_props.pending_action` for the backend.
+    BasicCatalogItems.button,
     _productCard,
     _weatherTile,
     _stat,

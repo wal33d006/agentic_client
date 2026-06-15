@@ -90,9 +90,19 @@ class AgUiTransport implements Transport {
   @override
   Future<void> sendRequest(gp.ChatMessage message) async {
     final userText = message.text;
-    if (userText.isEmpty) return;
+    // genUI converts catalog button taps into ChatMessages that carry a
+    // `UiInteractionPart` (mime: vnd.genui.interaction+json) instead of plain
+    // text. We forward those out-of-band via `forwarded_props.pending_action`
+    // — they are not chat messages and should not be appended to `_history`.
+    final pendingAction = _extractPendingAction(message.parts);
 
-    _history.add(agui.UserMessage(id: 'msg_${DateTime.now().millisecondsSinceEpoch}', content: userText));
+    if (userText.isEmpty && pendingAction == null) return;
+
+    if (userText.isNotEmpty) {
+      _history.add(agui.UserMessage(id: 'msg_${DateTime.now().millisecondsSinceEpoch}', content: userText));
+    }
+
+    final forwardedProps = <String, dynamic>{if (pendingAction != null) 'pending_action': pendingAction};
 
     final runId = 'run_${DateTime.now().millisecondsSinceEpoch}';
     final input = agui.SimpleRunAgentInput(
@@ -105,13 +115,22 @@ class AgUiTransport implements Transport {
       state: Map<String, dynamic>.from(_state.value),
       tools: const [],
       context: _buildContext(),
-      forwardedProps: const <String, dynamic>{},
+      forwardedProps: forwardedProps,
     );
 
-    debugPrint(
-      '[agui] → POST $baseUrl/ thread=$_threadId run=$runId '
-      'history=${_history.length} user="${_trunc(userText)}"',
-    );
+    if (pendingAction != null) {
+      debugPrint(
+        '[agui] → POST $baseUrl/ thread=$_threadId run=$runId '
+        'action=${pendingAction['name']} '
+        'source=${pendingAction['sourceComponentId']}',
+      );
+      _eventCtrl.add('User triggered ${pendingAction['name']}');
+    } else {
+      debugPrint(
+        '[agui] → POST $baseUrl/ thread=$_threadId run=$runId '
+        'history=${_history.length} user="${_trunc(userText)}"',
+      );
+    }
 
     final assistantText = StringBuffer();
     String? assistantMsgId;
@@ -326,7 +345,7 @@ class AgUiTransport implements Transport {
         return 'Rendering UI';
       case 'deleteSurface':
         return 'Removing surface';
-      case 'updateData':
+      case 'updateDataModel':
         return 'Updating data';
       default:
         return 'Applying UI change';
@@ -334,7 +353,7 @@ class AgUiTransport implements Transport {
   }
 
   String _opKind(Map<String, dynamic> op) {
-    for (final k in const ['createSurface', 'updateComponents', 'deleteSurface', 'updateData']) {
+    for (final k in const ['createSurface', 'updateComponents', 'deleteSurface', 'updateDataModel']) {
       if (op.containsKey(k)) return k;
     }
     return '<unknown>';
@@ -525,7 +544,41 @@ class AgUiTransport implements Transport {
       m.containsKey('createSurface') ||
       m.containsKey('updateComponents') ||
       m.containsKey('deleteSurface') ||
-      m.containsKey('updateData');
+      m.containsKey('updateDataModel');
+
+  /// Pulls the latest A2UI `action` payload from any [UiInteractionPart]s in
+  /// [parts] (created by genUI's `SurfaceController.handleUiEvent` when the
+  /// user interacts with a rendered surface).
+  ///
+  /// Returns `null` if no interaction parts are present. When multiple
+  /// interactions arrive in a single message (rare), the last one wins —
+  /// `SurfaceController` ships one per event, so this only matters if a
+  /// consumer manually merges messages.
+  Map<String, dynamic>? _extractPendingAction(List<gp.StandardPart> parts) {
+    final interactions = parts.uiInteractionParts;
+    if (interactions.isEmpty) return null;
+
+    Map<String, dynamic>? latest;
+    for (final part in interactions) {
+      try {
+        final decoded = jsonDecode(part.interaction);
+        if (decoded is Map<String, dynamic>) {
+          // genUI wraps the action under `{version: 'v0.9', action: {...}}`.
+          // Unwrap so the backend sees a flat action object.
+          final action = decoded['action'];
+          if (action is Map<String, dynamic>) {
+            latest = action;
+          } else if (decoded.containsKey('name')) {
+            // Tolerate already-unwrapped payloads.
+            latest = decoded;
+          }
+        }
+      } catch (err) {
+        debugPrint('[agui] failed to parse UiInteractionPart: $err');
+      }
+    }
+    return latest;
+  }
 
   /// Extracts ```<tag> ... ``` blocks from [text], appends each block's body
   /// to [into] as a raw JSON string, and returns the text with the blocks
