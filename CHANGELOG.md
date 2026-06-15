@@ -1,3 +1,7 @@
+## 0.0.8
+
+* Update docs
+
 ## 0.0.7
 
 * Added support for shared state between agent and UI
