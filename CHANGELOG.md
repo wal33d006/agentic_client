@@ -1,3 +1,7 @@
+## 0.0.3
+
+* Updated dart sdk version
+
 ## 0.0.2
 
 * Updated readme
