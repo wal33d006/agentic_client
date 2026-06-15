@@ -153,11 +153,25 @@ class _AguiChatState extends State<AguiChat> {
     );
     _conversation = Conversation(controller: _controller, transport: _transport);
     _conversation.events.listen(_onEvent);
+    // genUI's Conversation tracks waiting state on its `state` notifier (set
+    // to false in a try/finally around transport.sendRequest). Events alone
+    // are not enough — a click that only fires updateDataModel ops emits no
+    // ConversationComponentsUpdated, so listening to events leaves the
+    // loader spinning. The notifier is the authoritative source.
+    _conversation.state.addListener(_onConversationStateChanged);
     if (widget.showAgentEvents) {
       _transport.agentEvents.listen(_onAgentEvent);
     }
     if (widget.onStateChanged != null) {
       _transport.state.addListener(_onStateChanged);
+    }
+  }
+
+  void _onConversationStateChanged() {
+    final isWaiting = _conversation.state.value.isWaiting;
+    if (isWaiting != _waiting) {
+      setState(() => _waiting = isWaiting);
+      if (!isWaiting) _scrollToEnd();
     }
   }
 
@@ -175,6 +189,7 @@ class _AguiChatState extends State<AguiChat> {
     if (widget.onStateChanged != null) {
       _transport.state.removeListener(_onStateChanged);
     }
+    _conversation.state.removeListener(_onConversationStateChanged);
     _conversation.dispose();
     _transport.dispose();
     _controller.dispose();
@@ -194,19 +209,17 @@ class _AguiChatState extends State<AguiChat> {
           }
         case ConversationSurfaceRemoved(:final surfaceId):
           _items.removeWhere((i) => i is _SurfaceItem && i.surfaceId == surfaceId);
-        case ConversationWaiting():
-          _waiting = true;
         case ConversationError(:final error):
           _items.add(_AssistantBubble('⚠️ $error'));
-          _waiting = false;
+        case ConversationWaiting():
         case ConversationComponentsUpdated():
-          // Surface already on screen — auto-rebuilds via its SurfaceContext.
+          // ConversationWaiting / waiting-cleared transitions are handled
+          // by the conversation state notifier listener — _onEvent doesn't
+          // touch _waiting. ComponentsUpdated requires no state change here:
+          // the on-screen Surface auto-rebuilds via its SurfaceContext.
           break;
       }
     });
-    if (event is! ConversationWaiting) {
-      _waiting = false;
-    }
     _scrollToEnd();
   }
 
