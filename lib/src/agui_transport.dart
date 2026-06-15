@@ -15,7 +15,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:ag_ui/ag_ui.dart' as agui;
-import 'package:flutter/foundation.dart' show debugPrint;
+import 'package:flutter/foundation.dart' show ValueListenable, ValueNotifier, debugPrint;
 import 'package:genai_primitives/genai_primitives.dart' as gp;
 import 'package:genui/genui.dart';
 
@@ -58,6 +58,17 @@ class AgUiTransport implements Transport {
   /// these inline instead of a single loader.
   Stream<String> get agentEvents => _eventCtrl.stream;
 
+  /// Client-side mirror of the agent's shared state. The backend is the
+  /// source of truth: it is reset by STATE_SNAPSHOT events and patched by
+  /// STATE_DELTA events. The mirror is echoed back as
+  /// `SimpleRunAgentInput.state` on the next turn so the agent can continue
+  /// from it across requests.
+  final ValueNotifier<Map<String, dynamic>> _state = ValueNotifier(<String, dynamic>{});
+
+  /// Read-only listenable mirror of the agent's shared state. Wrap with a
+  /// `ValueListenableBuilder` to rebuild widgets when the agent mutates it.
+  ValueListenable<Map<String, dynamic>> get state => _state;
+
   /// Stable per-conversation IDs — keeps the backend's checkpointer happy.
   final String _threadId = 'thread_${DateTime.now().millisecondsSinceEpoch}';
 
@@ -88,7 +99,10 @@ class AgUiTransport implements Transport {
       threadId: _threadId,
       runId: runId,
       messages: List<agui.Message>.from(_history),
-      state: const <String, dynamic>{},
+      // Round-trip the mirrored state so the agent can resume from it.
+      // The backend remains the source of truth; the client never mutates
+      // this map locally.
+      state: Map<String, dynamic>.from(_state.value),
       tools: const [],
       context: _buildContext(),
       forwardedProps: const <String, dynamic>{},
@@ -216,6 +230,29 @@ class AgUiTransport implements Transport {
           debugPrint('[agui] ← run error: ${e.message}');
           _textCtrl.add('⚠️ ${e.message}');
 
+        case agui.EventType.stateSnapshot:
+          final e = event as agui.StateSnapshotEvent;
+          final snap = e.snapshot;
+          if (snap is Map) {
+            _state.value = Map<String, dynamic>.from(snap);
+            debugPrint('[agui] ← state snapshot: ${_state.value.keys.length} key(s)');
+            _eventCtrl.add('State synced');
+          } else {
+            debugPrint('[agui] ← state snapshot ignored: not a Map ($snap)');
+          }
+
+        case agui.EventType.stateDelta:
+          final e = event as agui.StateDeltaEvent;
+          try {
+            final next = _applyJsonPatch(_state.value, e.delta);
+            _state.value = next;
+            debugPrint('[agui] ← state delta: ${e.delta.length} op(s)');
+            _eventCtrl.add('State updated');
+          } catch (err) {
+            debugPrint('[agui] ← state delta failed: $err');
+            _textCtrl.add('⚠️ State patch failed: $err');
+          }
+
         default:
           // RUN_STARTED / RUN_FINISHED / STATE_* / STEP_* / etc.
           // Add handlers here when we need them (e.g. STATE_DELTA for the
@@ -319,6 +356,171 @@ class AgUiTransport implements Transport {
 
   static String _trunc(String s, [int n = 200]) => s.length <= n ? s : '${s.substring(0, n)}…(+${s.length - n})';
 
+  // ─── RFC 6902 JSON Patch (small inline impl) ───────────────────────────────
+
+  /// Applies a list of JSON Patch operations to [target] and returns a deep
+  /// copy of the resulting map. Supports `add`, `remove`, `replace`, `move`,
+  /// `copy`, and `test`. Throws [FormatException] on invalid input.
+  static Map<String, dynamic> _applyJsonPatch(Map<String, dynamic> target, List<dynamic> ops) {
+    final next = _deepCopy(target) as Map<String, dynamic>;
+    for (final raw in ops) {
+      if (raw is! Map) {
+        throw const FormatException('patch op must be a JSON object');
+      }
+      final op = raw['op'] as String?;
+      final path = raw['path'] as String?;
+      if (op == null || path == null) {
+        throw FormatException('patch op missing op/path: $raw');
+      }
+      switch (op) {
+        case 'add':
+          _setAt(next, path, _deepCopy(raw['value']), insert: true);
+        case 'remove':
+          _removeAt(next, path);
+        case 'replace':
+          _setAt(next, path, _deepCopy(raw['value']));
+        case 'move':
+          final from = raw['from'] as String?;
+          if (from == null) throw FormatException('move op missing `from`: $raw');
+          final value = _removeAt(next, from);
+          _setAt(next, path, value, insert: true);
+        case 'copy':
+          final from = raw['from'] as String?;
+          if (from == null) throw FormatException('copy op missing `from`: $raw');
+          _setAt(next, path, _deepCopy(_getAt(next, from)), insert: true);
+        case 'test':
+          if (!_deepEquals(_getAt(next, path), raw['value'])) {
+            throw FormatException('test op failed at $path');
+          }
+        default:
+          throw FormatException('unknown JSON patch op: $op');
+      }
+    }
+    return next;
+  }
+
+  /// Splits a JSON Pointer (RFC 6901) into segments, unescaping `~1`→`/` and
+  /// `~0`→`~`. The empty pointer "" addresses the whole document.
+  static List<String> _splitPointer(String pointer) {
+    if (pointer.isEmpty) return const [];
+    if (!pointer.startsWith('/')) {
+      throw FormatException('invalid JSON pointer (must start with "/"): $pointer');
+    }
+    return pointer
+        .substring(1)
+        .split('/')
+        .map((s) => s.replaceAll('~1', '/').replaceAll('~0', '~'))
+        .toList(growable: false);
+  }
+
+  static Object? _getAt(Object? root, String pointer) {
+    var current = root;
+    for (final segment in _splitPointer(pointer)) {
+      if (current is Map) {
+        current = current[segment];
+      } else if (current is List) {
+        current = current[int.parse(segment)];
+      } else {
+        throw FormatException('cannot traverse "$segment" in $current');
+      }
+    }
+    return current;
+  }
+
+  /// Writes [value] at [pointer]. When [insert] is true and the parent is a
+  /// list, the value is inserted at the index (matching JSON Patch `add`
+  /// semantics); otherwise the existing slot is overwritten.
+  static void _setAt(Object root, String pointer, Object? value, {bool insert = false}) {
+    final segments = _splitPointer(pointer);
+    if (segments.isEmpty) {
+      throw const FormatException('cannot set at root pointer ""');
+    }
+    Object parent = root;
+    for (var i = 0; i < segments.length - 1; i++) {
+      final s = segments[i];
+      if (parent is Map) {
+        parent = parent[s] as Object;
+      } else if (parent is List) {
+        parent = parent[int.parse(s)] as Object;
+      } else {
+        throw FormatException('cannot traverse "$s" in $parent');
+      }
+    }
+    final last = segments.last;
+    if (parent is Map) {
+      (parent as Map<String, dynamic>)[last] = value;
+    } else if (parent is List) {
+      final list = parent;
+      if (last == '-') {
+        list.add(value);
+      } else {
+        final idx = int.parse(last);
+        if (insert) {
+          list.insert(idx, value);
+        } else {
+          list[idx] = value;
+        }
+      }
+    } else {
+      throw FormatException('cannot set on $parent');
+    }
+  }
+
+  static Object? _removeAt(Object root, String pointer) {
+    final segments = _splitPointer(pointer);
+    if (segments.isEmpty) {
+      throw const FormatException('cannot remove at root pointer ""');
+    }
+    Object parent = root;
+    for (var i = 0; i < segments.length - 1; i++) {
+      final s = segments[i];
+      if (parent is Map) {
+        parent = parent[s] as Object;
+      } else if (parent is List) {
+        parent = parent[int.parse(s)] as Object;
+      } else {
+        throw FormatException('cannot traverse "$s" in $parent');
+      }
+    }
+    final last = segments.last;
+    if (parent is Map) {
+      return (parent as Map<String, dynamic>).remove(last);
+    }
+    if (parent is List) {
+      return (parent).removeAt(int.parse(last));
+    }
+    throw FormatException('cannot remove on $parent');
+  }
+
+  static Object? _deepCopy(Object? value) {
+    if (value is Map) {
+      return <String, dynamic>{for (final entry in value.entries) entry.key as String: _deepCopy(entry.value)};
+    }
+    if (value is List) {
+      return [for (final v in value) _deepCopy(v)];
+    }
+    return value;
+  }
+
+  static bool _deepEquals(Object? a, Object? b) {
+    if (identical(a, b)) return true;
+    if (a is Map && b is Map) {
+      if (a.length != b.length) return false;
+      for (final key in a.keys) {
+        if (!b.containsKey(key) || !_deepEquals(a[key], b[key])) return false;
+      }
+      return true;
+    }
+    if (a is List && b is List) {
+      if (a.length != b.length) return false;
+      for (var i = 0; i < a.length; i++) {
+        if (!_deepEquals(a[i], b[i])) return false;
+      }
+      return true;
+    }
+    return a == b;
+  }
+
   bool _looksLikeOp(Map<String, dynamic> m) =>
       m.containsKey('createSurface') ||
       m.containsKey('updateComponents') ||
@@ -381,6 +583,7 @@ class AgUiTransport implements Transport {
     _textCtrl.close();
     _msgCtrl.close();
     _eventCtrl.close();
+    _state.dispose();
     _client.close();
   }
 }

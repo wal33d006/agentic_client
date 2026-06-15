@@ -46,7 +46,7 @@ class _ChatScreen extends StatelessWidget {
         catalogDescription: exampleCatalogDescription,
         emptyStateTitle: 'What would you like to build?',
         emptyStateSendButtonLabel: 'Create',
-        hintText: 'Build me 3 fast food vendor cards',
+        hintText: 'Show me some products and tell me about the weather',
         sendButtonLabel: 'Send',
         showAgentEvents: true,
       ),

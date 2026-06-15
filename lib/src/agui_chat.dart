@@ -35,6 +35,7 @@ class AguiChat extends StatefulWidget {
     this.uiRenderToolNames = const {},
     this.markdownA2uiLangTag,
     this.showAgentEvents = false,
+    this.onStateChanged,
     super.key,
   });
 
@@ -86,6 +87,12 @@ class AguiChat extends StatefulWidget {
   /// are shown inline in the chat as small step rows, so the user sees what
   /// is happening instead of just a loader. Defaults to false.
   final bool showAgentEvents;
+
+  /// Called whenever the agent's shared state changes (after STATE_SNAPSHOT
+  /// or STATE_DELTA events). The backend is the source of truth: this
+  /// callback only observes, it cannot mutate. The map is a fresh copy on
+  /// every call.
+  final ValueChanged<Map<String, dynamic>>? onStateChanged;
 
   @override
   State<AguiChat> createState() => _AguiChatState();
@@ -149,6 +156,9 @@ class _AguiChatState extends State<AguiChat> {
     if (widget.showAgentEvents) {
       _transport.agentEvents.listen(_onAgentEvent);
     }
+    if (widget.onStateChanged != null) {
+      _transport.state.addListener(_onStateChanged);
+    }
   }
 
   void _onAgentEvent(String text) {
@@ -156,8 +166,15 @@ class _AguiChatState extends State<AguiChat> {
     _scrollToEnd();
   }
 
+  void _onStateChanged() {
+    widget.onStateChanged?.call(Map<String, dynamic>.from(_transport.state.value));
+  }
+
   @override
   void dispose() {
+    if (widget.onStateChanged != null) {
+      _transport.state.removeListener(_onStateChanged);
+    }
     _conversation.dispose();
     _transport.dispose();
     _controller.dispose();
