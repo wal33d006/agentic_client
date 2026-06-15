@@ -9,19 +9,14 @@ Flutter widgets.
 
 ## Features
 
-- **One widget, full chat surface** — `AguiChat` owns the transport, the
+- **One widget, full chat surface**: `AguiChat` owns the transport, the
   [`SurfaceController`][SurfaceController], and the conversation log; just give
   it a `baseUrl` and a `Catalog`.
 - **Streamed assistant text** rendered as chat bubbles with a thinking
   indicator while a turn is in flight.
-- **Generative UI inline** — A2UI surfaces emitted by the agent (tagged inside
+- **Generative UI inline**: A2UI surfaces emitted by the agent (tagged inside
   AG-UI `TOOL_CALL_RESULT` events) are unpacked and rendered with the catalog
   widgets you provide.
-- **Themed from the host** — bubbles, input field and send button read from
-  `Theme.of(context)`, so the widget inherits whatever `MaterialApp` theme you
-  hand it.
-- **Conversation history is replayed** on every turn, so stateless backends
-  still see the full prior context.
 
 [SurfaceController]: https://pub.dev/documentation/genui/latest/genui/SurfaceController-class.html
 
@@ -80,7 +75,7 @@ class ChatScreen extends StatelessWidget {
 ```
 
 `catalogDescription` is shipped to the agent on every request via the AG-UI
-`context` field — use it to teach the model the wire format and the props each
+`context` field. Use it to teach the model the wire format and the props each
 of your components accepts. For fixed-schema backends (where the agent's tool
 already knows the catalog), leave it `null`.
 
