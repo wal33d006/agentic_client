@@ -1,7 +1,7 @@
 name: agentic_client
 description: "A new Flutter package project."
 version: 0.0.1
-homepage:
+homepage: https://github.com/wal33d006/agentic_client
 
 environment:
   sdk: ^3.12.2
