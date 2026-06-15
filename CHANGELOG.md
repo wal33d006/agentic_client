@@ -1,3 +1,7 @@
+## 0.0.2
+
+* Updated readme
+
 ## 0.0.1
 
-* TODO: Dart chat client for rendering Flutter widgets over A2UI protocol leveraging AGUI streaming  
+* Dart chat client for rendering Flutter widgets over A2UI protocol leveraging AGUI streaming  
