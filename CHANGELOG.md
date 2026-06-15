@@ -1,3 +1,7 @@
+## 0.0.5
+
+* Added support for standard AGUI backends
+
 ## 0.0.4
 
 * Updated design
