@@ -13,7 +13,6 @@
 library;
 
 import 'package:flutter/material.dart';
-import 'package:genai_primitives/genai_primitives.dart' show ChatMessage;
 import 'package:genui/genui.dart';
 
 import 'agui_transport.dart';

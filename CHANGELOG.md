@@ -1,3 +1,7 @@
+## 0.0.10
+
+* Removed unused import
+
 ## 0.0.9
 
 * Removed unnecessary tags, update examples
