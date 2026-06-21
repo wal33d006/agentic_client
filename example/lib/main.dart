@@ -56,17 +56,10 @@ class _ChatScreenState extends State<_ChatScreen> {
             child: AguiChat(
               baseUrl: _backendUrl,
               catalog: buildExampleCatalog(),
-              catalogDescription: exampleCatalogDescription,
               emptyStateTitle: 'What would you like to build?',
               emptyStateSendButtonLabel: 'Create',
               hintText: 'Show me some products and tell me about the weather',
               sendButtonLabel: 'Send',
-              // showAgentEvents: true,
-              // The backend's ActionMiddleware emits A2UI ops via
-              // `manually_emit_tool_call` named `emit_ui_update`. Registering
-              // the name here makes the transport unwrap its args as A2UI
-              // operations (instead of treating it as a normal tool call).
-              uiRenderToolNames: const {'emit_ui_update'},
               onStateChanged: (s) => setState(() => _agentState = s),
             ),
           ),

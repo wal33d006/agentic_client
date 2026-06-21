@@ -20,12 +20,8 @@ import 'package:genai_primitives/genai_primitives.dart' as gp;
 import 'package:genui/genui.dart';
 
 class AgUiTransport implements Transport {
-  AgUiTransport({
-    required this.baseUrl,
-    this.catalogDescription,
-    this.uiRenderToolNames = const {},
-    this.markdownA2uiLangTag,
-  }) : _client = agui.AgUiClient(config: agui.AgUiClientConfig(baseUrl: baseUrl));
+  AgUiTransport({required this.baseUrl, this.catalogDescription, this.uiRenderToolNames = const {}})
+    : _client = agui.AgUiClient(config: agui.AgUiClientConfig(baseUrl: baseUrl));
 
   /// e.g. `http://localhost:8123`. We POST to `$baseUrl/` (trailing slash
   /// — the backend mounts the graph at root).
@@ -42,11 +38,6 @@ class AgUiTransport implements Transport {
   /// is parsed as A2UI and a synthesized ToolMessage is appended to history
   /// so the next turn sees the call as resolved.
   final Set<String> uiRenderToolNames;
-
-  /// Fenced code-block language tag to intercept inside assistant text. When
-  /// non-null (e.g. `'a2ui'`), blocks tagged ```<tag> ... ``` are stripped
-  /// from the chat bubble and parsed as A2UI ops. Null disables this path.
-  final String? markdownA2uiLangTag;
 
   final agui.AgUiClient _client;
   final _textCtrl = StreamController<String>.broadcast();
@@ -152,25 +143,8 @@ class AgUiTransport implements Transport {
           final e = event as agui.TextMessageChunkEvent;
           if (e.delta != null) assistantText.write(e.delta);
         case agui.EventType.textMessageEnd:
-          var text = assistantText.toString();
+          final text = assistantText.toString();
           debugPrint('[agui] ← text: "${_trunc(text)}"');
-          // Markdown-intercept path: pull any fenced A2UI blocks out of the
-          // text and queue them, then emit text first (so the bubble shows
-          // above the surface) and the ops after.
-          final fencedJsonBlocks = <String>[];
-          if (markdownA2uiLangTag != null) {
-            text = _stripA2uiFences(text, into: fencedJsonBlocks);
-            if (fencedJsonBlocks.isNotEmpty) {
-              debugPrint(
-                '[agui] markdown-fence intercept: '
-                '${fencedJsonBlocks.length} block(s) extracted',
-              );
-              _eventCtrl.add(
-                'Extracted ${fencedJsonBlocks.length} UI '
-                'block${fencedJsonBlocks.length == 1 ? '' : 's'} from response',
-              );
-            }
-          }
           if (text.isNotEmpty) {
             _textCtrl.add(text);
             _history.add(
@@ -179,9 +153,6 @@ class AgUiTransport implements Transport {
                 content: text,
               ),
             );
-          }
-          for (final json in fencedJsonBlocks) {
-            _emitA2uiOpsFromJsonString(json, source: 'markdown');
           }
 
         case agui.EventType.toolCallStart:
@@ -284,10 +255,11 @@ class AgUiTransport implements Transport {
   /// Parses a JSON string and emits A2UI ops from it. Accepts either:
   ///   • the CopilotKit envelope `{ "a2ui_operations": [op, op, ...] }`, or
   ///   • a bare op like `{ "createSurface": {...} }` /
-  ///     `{ "updateComponents": {...} }` (used by the args / markdown paths).
+  ///     `{ "updateComponents": {...} }` (used by the ghost tool-call args
+  ///     path).
   ///
   /// [source] is purely for logging — identifies which path picked this up
-  /// (`tool-result`, `tool-args`, or `markdown`).
+  /// (`tool-result` or `tool-args`).
   void _emitA2uiOpsFromJsonString(String content, {required String source}) {
     Object? decoded;
     try {
@@ -578,21 +550,6 @@ class AgUiTransport implements Transport {
       }
     }
     return latest;
-  }
-
-  /// Extracts ```<tag> ... ``` blocks from [text], appends each block's body
-  /// to [into] as a raw JSON string, and returns the text with the blocks
-  /// removed.
-  String _stripA2uiFences(String text, {required List<String> into}) {
-    final tag = RegExp.escape(markdownA2uiLangTag!);
-    // `(.*?)` is non-greedy so each block is matched independently when the
-    // text contains more than one fence.
-    final pattern = RegExp('```$tag\\s*(.*?)\\s*```', dotAll: true);
-    final cleaned = text.replaceAllMapped(pattern, (m) {
-      into.add(m.group(1) ?? '');
-      return '';
-    });
-    return cleaned.trim();
   }
 
   /// Best-effort hint about why an op was rejected. The agent's most common

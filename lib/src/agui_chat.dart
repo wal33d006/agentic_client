@@ -33,7 +33,6 @@ class AguiChat extends StatefulWidget {
     this.emptyStateTitle,
     this.emptyStateSendButtonLabel = 'Send',
     this.uiRenderToolNames = const {},
-    this.markdownA2uiLangTag,
     this.showAgentEvents = false,
     this.onStateChanged,
     super.key,
@@ -75,13 +74,6 @@ class AguiChat extends StatefulWidget {
   /// args JSON is parsed as A2UI ops and a synthesized tool result is
   /// recorded in history.
   final Set<String> uiRenderToolNames;
-
-  /// Fenced code-block language tag to intercept inside assistant text. When
-  /// set (e.g. `'a2ui'`), the widget extracts ```<tag> ... ``` blocks from
-  /// streamed assistant text, parses them as A2UI ops, and renders them as
-  /// surfaces; the surrounding text is shown as a normal chat bubble. Null
-  /// disables this path.
-  final String? markdownA2uiLangTag;
 
   /// When true, AG-UI lifecycle events (tool calls, surface renders, etc.)
   /// are shown inline in the chat as small step rows, so the user sees what
@@ -149,7 +141,6 @@ class _AguiChatState extends State<AguiChat> {
       baseUrl: widget.baseUrl,
       catalogDescription: widget.catalogDescription,
       uiRenderToolNames: widget.uiRenderToolNames,
-      markdownA2uiLangTag: widget.markdownA2uiLangTag,
     );
     _conversation = Conversation(controller: _controller, transport: _transport);
     _conversation.events.listen(_onEvent);

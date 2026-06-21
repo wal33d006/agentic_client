@@ -7,6 +7,9 @@ Flutter widgets.
 
 ![agentic_client example screenshot](assets/dart_client.png)
 
+
+![agentic_client counter screenshot](assets/counter.png)
+
 ## Features
 
 - **One widget, full chat surface**: `AguiChat` owns the transport, the
@@ -14,7 +17,7 @@ Flutter widgets.
   it a `baseUrl` and a `Catalog`.
 - **Streamed assistant text** rendered as chat bubbles with a thinking
   indicator while a turn is in flight.
-- **Generative UI inline** via three configurable ingest paths:
+- **Generative UI inline** via two configurable ingest paths:
   1. **Tool-result envelope** (default): A2UI ops in `TOOL_CALL_RESULT.content`
      under an `a2ui_operations` array (the CopilotKit convention).
   2. **Ghost tool-call args** (`uiRenderToolNames`): the ops live in
@@ -23,9 +26,6 @@ Flutter widgets.
      picks up server-side UI patches emitted via LangGraph's
      `manually_emit_tool_call` custom event, so backends can refresh a
      surface without re-invoking the LLM.
-  3. **Markdown fence intercept** (`markdownA2uiLangTag`): fenced code blocks
-     with a configurable lang tag are stripped out of assistant text and
-     parsed as A2UI ops.
 - **Shared agent state** (`onStateChanged`): the client mirrors the agent's
   `state` via `STATE_SNAPSHOT` / `STATE_DELTA` (RFC 6902 JSON Patch). The
   backend is the source of truth: the mirror is read-only on the client and
@@ -92,10 +92,9 @@ class ChatScreen extends StatelessWidget {
         catalogDescription: '... optional A2UI prompt context ...',
         hintText: 'Ask me anything…',
 
-        // Optional A2UI ingest paths (enable on top of the always-on
-        // tool-result envelope).
+        // Optional ghost tool-call path on top of the always-on
+        // tool-result envelope.
         uiRenderToolNames: const {'render_ui_widget', 'emit_ui_update'},
-        markdownA2uiLangTag: 'a2ui',
 
         // Observe shared state. Fires on STATE_SNAPSHOT and STATE_DELTA.
         // The backend is the source of truth; the map is a fresh copy on

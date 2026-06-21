@@ -8,9 +8,13 @@
 ///   • `Stat`         — label + big number for KPI-style readouts
 library;
 
+import 'package:example/user_profile.dart';
 import 'package:flutter/material.dart';
 import 'package:genui/genui.dart';
 import 'package:json_schema_builder/json_schema_builder.dart';
+
+import 'counter.dart';
+import 'my_button.dart';
 
 const exampleCatalogId = 'copilotkit://app-dashboard-catalog';
 
@@ -161,10 +165,14 @@ Catalog buildExampleCatalog() {
     BasicCatalogItems.column,
     BasicCatalogItems.row,
     BasicCatalogItems.divider,
+    BasicCatalogItems.list,
     // Interactive: taps fire a UserActionEvent → SurfaceController forwards
     // it through Conversation → AgUiTransport packs it into
     // `forwarded_props.pending_action` for the backend.
     BasicCatalogItems.button,
+    userProfileItem,
+    buttonItem,
+    counterItem,
     _productCard,
     _weatherTile,
     _stat,
