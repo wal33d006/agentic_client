@@ -1,3 +1,7 @@
+## 0.0.9
+
+* Removed unnecessary tags, update examples
+
 ## 0.0.8
 
 * Update docs
