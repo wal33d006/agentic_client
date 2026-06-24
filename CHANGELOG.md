@@ -1,3 +1,7 @@
+## 0.0.12
+
+* Add gif example to readme
+
 ## 0.0.11
 
 * Collapsed non-user AGUI events in a dropdown
