@@ -1,3 +1,7 @@
+## 0.0.11
+
+* Collapsed non-user AGUI events in a dropdown
+
 ## 0.0.10
 
 * Removed unused import
