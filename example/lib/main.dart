@@ -51,7 +51,7 @@ class _ChatScreenState extends State<_ChatScreen> {
     return Scaffold(
       body: Column(
         children: [
-          _StateStrip(state: _agentState),
+          // _StateStrip(state: _agentState),
           Expanded(
             child: AguiChat(
               baseUrl: _backendUrl,
@@ -60,7 +60,7 @@ class _ChatScreenState extends State<_ChatScreen> {
               emptyStateSendButtonLabel: 'Create',
               hintText: 'Show me some products and tell me about the weather',
               sendButtonLabel: 'Send',
-              onStateChanged: (s) => setState(() => _agentState = s),
+              // onStateChanged: (s) => setState(() => _agentState = s),
             ),
           ),
         ],

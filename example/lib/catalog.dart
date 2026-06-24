@@ -13,8 +13,12 @@ import 'package:flutter/material.dart';
 import 'package:genui/genui.dart';
 import 'package:json_schema_builder/json_schema_builder.dart';
 
+import 'cart_selector.dart';
+import 'cart_summary.dart';
 import 'counter.dart';
 import 'my_button.dart';
+import 'restaurant_list.dart';
+import 'restaurant_menu.dart';
 
 const exampleCatalogId = 'copilotkit://app-dashboard-catalog';
 
@@ -56,9 +60,18 @@ silently (e.g. "increment") or injects a synthetic HumanMessage so you
 respond (e.g. "buy").
 
 Common silent action names this backend recognizes:
-  - "increment"   → state.counter += 1
-  - "decrement"   → state.counter = max(0, state.counter - 1)
-  - "toggleTodo"  → flips state.todos[ctx.id].done
+  - "increment"      → state.counter += 1
+  - "decrement"      → state.counter = max(0, state.counter - 1)
+  - "toggleTodo"     → flips state.todos[ctx.id].done
+  - "toggleCartItem"  → flips selected for state.cart[context.item_id] (step 1)
+  - "cartCheckout"    → renders the CartSummary surface (advances to step 2)
+  - "cartPay"         → marks the CartSummary as paid
+  - "selectRestaurant"→ opens RestaurantMenu for context.restaurant_id
+  - "addToCart"       → adds context.item_id to the food cart
+  - "removeFromCart"  → decrements context.item_id in the food cart
+  - "viewCheckout"    → renders the order CartSummary (advances to checkout)
+  - "listRestaurants" → returns to the RestaurantList
+  - "payOrder"        → marks the order CartSummary as paid
 
 Pick action names from this set when emitting Buttons. The Button's
 `child` is the id of a Text component used as the label.
@@ -81,6 +94,38 @@ Custom:
     label: string  (required)
     value: string  (required, e.g. "1,284")
   }
+
+  CartSelector {            // step 1 of the two-step cart flow
+    items: object[]  (required, list of {id, name, price, selected}; bind to /items)
+    total: string    (optional, formatted total of selected items; bind to /total)
+  }                         // rows fire "toggleCartItem" (context {item_id});
+                           // the button fires "cartCheckout"
+
+  CartSummary {            // step 2 — rendered by the backend's cart_checkout
+    items:  object[]  (required, selected {id, name, price}; bind to /items)
+    total:  string    (required, formatted total; bind to /total)
+    status: string    (optional, "pending" | "paid"; bind to /status)
+  }                         // the Pay button fires "cartPay"
+
+  Prefer the dedicated build_cart tool to start the cart flow; it renders
+  CartSelector and seeds shared state. You normally don't emit these two
+  components by hand.
+
+  RestaurantList {         // step 1 of the food-ordering flow
+    restaurants: object[]  (required, list of {id, name, cuisine, rating}; bind to /restaurants)
+  }                         // rows fire "selectRestaurant" (context {restaurant_id})
+
+  RestaurantMenu {         // step 2 — rendered by select_restaurant
+    restaurantName: string   (optional; bind to /restaurantName)
+    items:          object[] (required, {id, name, price, qty}; bind to /items)
+    cartCount:      string   (optional; bind to /cartCount)
+    cartTotal:      string   (optional; bind to /cartTotal)
+  }                         // rows fire "addToCart"/"removeFromCart" (context {item_id});
+                           // back fires "listRestaurants"; the footer fires "viewCheckout"
+
+  The food checkout reuses CartSummary with item `qty` and payAction="payOrder".
+  Prefer the dedicated list_restaurants tool to start this flow; you normally
+  don't emit RestaurantList / RestaurantMenu by hand.
 
 ═══════════ EXAMPLES ═══════════
 
@@ -173,6 +218,15 @@ Catalog buildExampleCatalog() {
     userProfileItem,
     buttonItem,
     counterItem,
+    // Two-step cart flow: CartSelector (step 1) → CartSummary (step 2),
+    // carried across steps by the backend's shared `cart` state.
+    cartSelectorItem,
+    cartSummaryItem,
+    // Food-ordering flow: RestaurantList (step 1) → RestaurantMenu (step 2) →
+    // CartSummary (step 3, reused), carried by shared `selected_restaurant_id`
+    // and `food_cart` state.
+    restaurantListItem,
+    restaurantMenuItem,
     _productCard,
     _weatherTile,
     _stat,
