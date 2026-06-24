@@ -115,10 +115,13 @@ class _SurfaceItem extends _ChatItem {
   final String surfaceId;
 }
 
-class _EventItem extends _ChatItem {
-  const _EventItem(this.text);
+/// A run of consecutive agent events. Events arrive in batches between
+/// assistant turns, so rather than appending one muted row per event we
+/// collect each unbroken run into a single collapsible group.
+class _EventGroup extends _ChatItem {
+  _EventGroup(this.events);
 
-  final String text;
+  final List<String> events;
 }
 
 // ─── State ──────────────────────────────────────────────────────────────────
@@ -166,7 +169,16 @@ class _AguiChatState extends State<AguiChat> {
   }
 
   void _onAgentEvent(String text) {
-    setState(() => _items.add(_EventItem(text)));
+    setState(() {
+      // Coalesce consecutive events into the trailing group so the chat
+      // shows one collapsible row per batch instead of a long list.
+      final last = _items.isNotEmpty ? _items.last : null;
+      if (last is _EventGroup) {
+        last.events.add(text);
+      } else {
+        _items.add(_EventGroup([text]));
+      }
+    });
     _scrollToEnd();
   }
 
@@ -293,7 +305,7 @@ class _AguiChatState extends State<AguiChat> {
                 _UserBubble(:final text) => _Bubble(text: text, fromUser: true),
                 _AssistantBubble(:final text) => _Bubble(text: text, fromUser: false),
                 _SurfaceItem(:final surfaceId) => _SurfaceBubble(surfaceContext: _controller.contextFor(surfaceId)),
-                _EventItem(:final text) => _EventRow(text: text),
+                _EventGroup() => _EventGroupTile(key: ObjectKey(item), group: item),
               };
             },
           ),
@@ -368,29 +380,79 @@ class _SurfaceBubble extends StatelessWidget {
   }
 }
 
-class _EventRow extends StatelessWidget {
-  const _EventRow({required this.text});
+/// A collapsible row for a run of agent events. Collapsed by default so the
+/// user sees a single summary line ("3 steps") instead of every grey event;
+/// tapping expands to reveal each event in order.
+class _EventGroupTile extends StatefulWidget {
+  const _EventGroupTile({required this.group, super.key});
 
-  final String text;
+  final _EventGroup group;
+
+  @override
+  State<_EventGroupTile> createState() => _EventGroupTileState();
+}
+
+class _EventGroupTileState extends State<_EventGroupTile> {
+  bool _expanded = false;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final mutedColor = theme.colorScheme.onSurface.withValues(alpha: 0.55);
+    final mutedStyle = theme.textTheme.bodySmall?.copyWith(color: mutedColor, fontStyle: FontStyle.italic);
+    final events = widget.group.events;
+    // The latest event doubles as the collapsed summary, so the user can see
+    // what's happening at a glance without expanding.
+    final summary = events.length == 1 ? events.first : '${events.last}  ·  ${events.length} steps';
+
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
-      child: Row(
+      child: Column(
         mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(Icons.circle, size: 6, color: mutedColor),
-          const SizedBox(width: 10),
-          Flexible(
-            child: Text(
-              text,
-              style: theme.textTheme.bodySmall?.copyWith(color: mutedColor, fontStyle: FontStyle.italic),
+          InkWell(
+            onTap: events.length == 1 ? null : () => setState(() => _expanded = !_expanded),
+            borderRadius: BorderRadius.circular(6),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 2),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  Icon(
+                    events.length == 1 ? Icons.circle : (_expanded ? Icons.expand_more : Icons.chevron_right),
+                    size: events.length == 1 ? 6 : 16,
+                    color: mutedColor,
+                  ),
+                  SizedBox(width: events.length == 1 ? 10 : 4),
+                  Flexible(child: Text(summary, style: mutedStyle)),
+                ],
+              ),
             ),
           ),
+          if (_expanded && events.length > 1)
+            Padding(
+              padding: const EdgeInsets.only(left: 20, top: 2),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  for (final event in events)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 3),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          Icon(Icons.circle, size: 6, color: mutedColor),
+                          const SizedBox(width: 10),
+                          Flexible(child: Text(event, style: mutedStyle)),
+                        ],
+                      ),
+                    ),
+                ],
+              ),
+            ),
         ],
       ),
     );

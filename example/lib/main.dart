@@ -60,6 +60,7 @@ class _ChatScreenState extends State<_ChatScreen> {
               emptyStateSendButtonLabel: 'Create',
               hintText: 'Show me some products and tell me about the weather',
               sendButtonLabel: 'Send',
+              showAgentEvents: true,
               // onStateChanged: (s) => setState(() => _agentState = s),
             ),
           ),
