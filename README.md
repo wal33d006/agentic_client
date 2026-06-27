@@ -37,6 +37,10 @@ Flutter widgets.
 - **Inline agent-event steps** (`showAgentEvents: true`): show small italic
   step rows like "Calling render_ui_widget…" / "Rendering 4 components" /
   "Updating data" as the agent works, instead of a single loader spinner.
+- **Human-in-the-loop approvals** (automatic): when the backend graph pauses
+  with LangGraph's `interrupt(...)`, the widget renders an inline approval
+  card and resumes the paused run with the user's Approve / Reject decision —
+  no extra configuration required.
 
 [SurfaceController]: https://pub.dev/documentation/genui/latest/genui/SurfaceController-class.html
 
@@ -135,6 +139,42 @@ named `manually_emit_tool_call` with `args` set to a JSON-encoded
 `uiRenderToolNames`. The client unwraps the envelope and applies the ops
 to the surface, so components with `{"path": "/..."}` bindings update in
 place.
+
+### Human-in-the-loop approvals
+
+For consequential or irreversible actions (sending money, deleting data,
+placing an order), an agent can pause mid-run and ask the user to confirm
+before proceeding. This uses LangGraph's `interrupt(...)` primitive and works
+out of the box — there is no flag to enable.
+
+The flow:
+
+1. The backend tool calls `interrupt(payload)`, which suspends the graph on
+   its checkpointer (keyed by the conversation's thread id).
+2. `ag_ui_langgraph` surfaces the pause as a `CUSTOM` AG-UI event named
+   `on_interrupt` whose `value` is the `payload`.
+3. `AguiChat` renders an inline approval card from that payload and waits.
+4. When the user taps Approve / Reject, the client resumes the paused graph by
+   sending the decision back as `forwarded_props.command.resume` — continuing
+   the same run rather than starting a new turn.
+
+The card reads its text and button labels from the payload, falling back to
+sensible defaults:
+
+```jsonc
+{
+  "question": "Approve this action?\n\nTransfer $500 to Alice", // body text (falls back to `action`)
+  "action": "Transfer $500 to Alice",                          // used if `question` is absent
+  "approveLabel": "Approve",                                   // optional, defaults to "Approve"
+  "rejectLabel": "Reject"                                      // optional, defaults to "Reject"
+}
+```
+
+The decision is sent as `{"approved": true}` / `{"approved": false}`, so the
+backend tool resumes by reading `decision["approved"]`. Requires a backend
+checkpointer (e.g. LangGraph's `MemorySaver`) so the run can be resumed; an
+in-process checkpointer is fine for a single server, but use a persistent one
+to survive restarts or span multiple workers.
 
 A complete runnable app, including custom `ProductCard`, `WeatherTile` and
 `Stat` catalog items, lives in [`/example`](example/). Run it against any
