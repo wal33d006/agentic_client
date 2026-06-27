@@ -43,11 +43,20 @@ class AgUiTransport implements Transport {
   final _textCtrl = StreamController<String>.broadcast();
   final _msgCtrl = StreamController<A2uiMessage>.broadcast();
   final _eventCtrl = StreamController<String>.broadcast();
+  final _interruptCtrl = StreamController<Map<String, dynamic>>.broadcast();
 
   /// High-level lifecycle events emitted during a turn — one short phrase per
   /// step (tool calls, surface renders, etc.). UIs can subscribe and show
   /// these inline instead of a single loader.
   Stream<String> get agentEvents => _eventCtrl.stream;
+
+  /// Human-in-the-loop interrupts. When the backend graph calls LangGraph's
+  /// `interrupt(value)`, the run pauses and `ag_ui_langgraph` surfaces it as a
+  /// CUSTOM AG-UI event named `on_interrupt`. Each emission here is that
+  /// interrupt's payload (the dict passed to `interrupt(...)` on the backend).
+  /// The UI should render an approval/prompt from it and call [resume] with the
+  /// user's decision to continue the graph from where it paused.
+  Stream<Map<String, dynamic>> get interrupts => _interruptCtrl.stream;
 
   /// Client-side mirror of the agent's shared state. The backend is the
   /// source of truth: it is reset by STATE_SNAPSHOT events and patched by
@@ -123,6 +132,42 @@ class AgUiTransport implements Transport {
       );
     }
 
+    await _consumeRun(input);
+  }
+
+  /// Resumes a paused graph after a human-in-the-loop [interrupts] event.
+  ///
+  /// Sends [decision] back to the backend as `forwarded_props.command.resume`,
+  /// which `ag_ui_langgraph` turns into `Command(resume: decision)` to continue
+  /// the graph from the exact `interrupt(...)` call that paused it. No new chat
+  /// message is added — this is a continuation of the same turn, not a new one.
+  /// History and the mirrored state are still sent (harmlessly; the backend
+  /// resumes from its checkpointer, keyed by the stable thread id).
+  ///
+  /// [decision] is typically `{'approved': true}` / `{'approved': false}`, but
+  /// any JSON-encodable value is forwarded verbatim.
+  Future<void> resume(Object decision) async {
+    final runId = 'run_${DateTime.now().millisecondsSinceEpoch}';
+    final input = agui.SimpleRunAgentInput(
+      threadId: _threadId,
+      runId: runId,
+      messages: List<agui.Message>.from(_history),
+      state: Map<String, dynamic>.from(_state.value),
+      tools: const [],
+      context: _buildContext(),
+      forwardedProps: {
+        'command': {'resume': decision},
+      },
+    );
+    debugPrint('[agui] → POST $baseUrl/ thread=$_threadId run=$runId resume=$decision');
+    _eventCtrl.add('Resuming…');
+    await _consumeRun(input);
+  }
+
+  /// Streams a single AG-UI run to completion, translating events into text,
+  /// A2UI surfaces, state updates, lifecycle phrases and interrupts. Shared by
+  /// [sendRequest] (new turn) and [resume] (continue a paused graph).
+  Future<void> _consumeRun(agui.SimpleRunAgentInput input) async {
     final assistantText = StringBuffer();
     String? assistantMsgId;
     final toolArgsById = <String, StringBuffer>{};
@@ -241,6 +286,22 @@ class AgUiTransport implements Transport {
           } catch (err) {
             debugPrint('[agui] ← state delta failed: $err');
             _textCtrl.add('⚠️ State patch failed: $err');
+          }
+
+        case agui.EventType.custom:
+          // Human-in-the-loop: the backend graph called `interrupt(value)` and
+          // ag_ui_langgraph forwarded it as a CUSTOM event named `on_interrupt`
+          // whose `value` is the interrupt payload. Surface it so the UI can
+          // prompt the user; the run ends here (RUN_FINISHED follows) and stays
+          // paused until `resume(...)` is called.
+          final e = event as agui.CustomEvent;
+          if (e.name == 'on_interrupt') {
+            final payload = _coerceMap(e.value);
+            debugPrint('[agui] ← interrupt: $payload');
+            if (payload != null) {
+              _interruptCtrl.add(payload);
+              _eventCtrl.add('Awaiting your decision…');
+            }
           }
 
         default:
@@ -512,6 +573,23 @@ class AgUiTransport implements Transport {
     return a == b;
   }
 
+  /// Normalizes a CUSTOM event value into a `Map`. `ag_ui_langgraph` ships the
+  /// interrupt payload as JSON, which the AG-UI client usually decodes to a
+  /// `Map` already; tolerate a raw JSON string too. Anything else → null.
+  Map<String, dynamic>? _coerceMap(Object? value) {
+    if (value is Map<String, dynamic>) return value;
+    if (value is Map) return Map<String, dynamic>.from(value);
+    if (value is String) {
+      try {
+        final decoded = jsonDecode(value);
+        if (decoded is Map) return Map<String, dynamic>.from(decoded);
+      } catch (_) {
+        /* not JSON */
+      }
+    }
+    return null;
+  }
+
   bool _looksLikeOp(Map<String, dynamic> m) =>
       m.containsKey('createSurface') ||
       m.containsKey('updateComponents') ||
@@ -593,6 +671,7 @@ class AgUiTransport implements Transport {
     _textCtrl.close();
     _msgCtrl.close();
     _eventCtrl.close();
+    _interruptCtrl.close();
     _state.dispose();
     _client.close();
   }

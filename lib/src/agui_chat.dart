@@ -124,6 +124,17 @@ class _EventGroup extends _ChatItem {
   final List<String> events;
 }
 
+/// A human-in-the-loop approval prompt raised by a backend `interrupt(...)`.
+/// Mutable so the card can record the user's decision in place once made —
+/// the run resumes and the buttons collapse into a muted outcome line.
+class _InterruptItem extends _ChatItem {
+  _InterruptItem(this.payload);
+
+  final Map<String, dynamic> payload;
+  bool resolved = false;
+  bool? approved;
+}
+
 // ─── State ──────────────────────────────────────────────────────────────────
 
 class _AguiChatState extends State<AguiChat> {
@@ -155,6 +166,9 @@ class _AguiChatState extends State<AguiChat> {
     if (widget.showAgentEvents) {
       _transport.agentEvents.listen(_onAgentEvent);
     }
+    // Always listen for human-in-the-loop interrupts — they need a response
+    // regardless of whether step events are shown.
+    _transport.interrupts.listen(_onInterrupt);
     if (widget.onStateChanged != null) {
       _transport.state.addListener(_onStateChanged);
     }
@@ -184,6 +198,32 @@ class _AguiChatState extends State<AguiChat> {
 
   void _onStateChanged() {
     widget.onStateChanged?.call(Map<String, dynamic>.from(_transport.state.value));
+  }
+
+  /// A backend `interrupt(...)` paused the graph. The run has ended (the loader
+  /// clears), so drop an approval card into the log and wait for the user.
+  void _onInterrupt(Map<String, dynamic> payload) {
+    setState(() {
+      _waiting = false;
+      _items.add(_InterruptItem(payload));
+    });
+    _scrollToEnd();
+  }
+
+  /// User answered an approval card. Send the decision back via the transport's
+  /// resume path (NOT the conversation — this continues the paused graph), and
+  /// manage the loader ourselves since we bypass `Conversation.sendRequest`.
+  void _decide(_InterruptItem item, bool approved) {
+    if (item.resolved) return;
+    setState(() {
+      item.resolved = true;
+      item.approved = approved;
+      _waiting = true;
+    });
+    _transport.resume({'approved': approved}).whenComplete(() {
+      if (mounted) setState(() => _waiting = false);
+    });
+    _scrollToEnd();
   }
 
   @override
@@ -306,6 +346,11 @@ class _AguiChatState extends State<AguiChat> {
                 _AssistantBubble(:final text) => _Bubble(text: text, fromUser: false),
                 _SurfaceItem(:final surfaceId) => _SurfaceBubble(surfaceContext: _controller.contextFor(surfaceId)),
                 _EventGroup() => _EventGroupTile(key: ObjectKey(item), group: item),
+                _InterruptItem() => _InterruptCard(
+                  key: ObjectKey(item),
+                  item: item,
+                  onDecide: (approved) => _decide(item, approved),
+                ),
               };
             },
           ),
@@ -375,6 +420,76 @@ class _SurfaceBubble extends StatelessWidget {
           borderRadius: BorderRadius.circular(12),
         ),
         child: Surface(surfaceContext: surfaceContext),
+      ),
+    );
+  }
+}
+
+/// An approval prompt for a human-in-the-loop `interrupt(...)`. Reads its text
+/// and button labels from the interrupt payload, and once answered collapses
+/// the buttons into a muted outcome line. All visuals come from the host theme.
+class _InterruptCard extends StatelessWidget {
+  const _InterruptCard({required this.item, required this.onDecide, super.key});
+
+  final _InterruptItem item;
+  final ValueChanged<bool> onDecide;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final payload = item.payload;
+    final question = (payload['question'] ?? payload['action'] ?? 'Approve this action?').toString();
+    final approveLabel = (payload['approveLabel'] ?? 'Approve').toString();
+    final rejectLabel = (payload['rejectLabel'] ?? 'Reject').toString();
+
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 480),
+        margin: const EdgeInsets.symmetric(vertical: 6),
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: scheme.surface,
+          border: Border.all(color: scheme.primary.withValues(alpha: 0.5)),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.shield_outlined, size: 18, color: scheme.primary),
+                const SizedBox(width: 8),
+                Text(
+                  'Approval needed',
+                  style: theme.textTheme.labelLarge?.copyWith(color: scheme.primary, fontWeight: FontWeight.w600),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Text(question, style: theme.textTheme.bodyMedium),
+            const SizedBox(height: 14),
+            if (item.resolved)
+              Text(
+                item.approved! ? '✓ $approveLabel' : '✕ $rejectLabel',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: scheme.onSurface.withValues(alpha: 0.6),
+                  fontStyle: FontStyle.italic,
+                ),
+              )
+            else
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(onPressed: () => onDecide(false), child: Text(rejectLabel)),
+                  const SizedBox(width: 8),
+                  FilledButton(onPressed: () => onDecide(true), child: Text(approveLabel)),
+                ],
+              ),
+          ],
+        ),
       ),
     );
   }
