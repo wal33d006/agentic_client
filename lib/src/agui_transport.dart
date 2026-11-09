@@ -1,26 +1,24 @@
-/// Bridges the AG-UI event stream from our backend into genui's [Transport]
-/// interface. The backend emits standard AG-UI events; A2UI ops travel inside
+/// Bridges the AG-UI event stream from our backend into `a2ui_core` A2UI
+/// messages. The backend emits standard AG-UI events; A2UI ops travel inside
 /// `TOOL_CALL_RESULT.content` under the `a2ui_operations` envelope (the
 /// CopilotKit convention used by `a2ui.render(...)` on the Python side).
 ///
 /// This adapter:
 ///   • posts each user message to `${baseUrl}/` via AgUiClient
 ///   • forwards completed assistant text bubbles to `incomingText`
-///   • unwraps `a2ui_operations`, parses each op into an `A2uiMessage`, and
-///     pushes them to `incomingMessages` — which genui's SurfaceController
-///     consumes to build/update Surfaces
+///   • unwraps `a2ui_operations`, parses each op into an
+///     `AgentToRendererMessage`, and pushes them to `incomingMessages` — which
+///     a `MessageProcessor` consumes to build/update surfaces
 library;
 
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:a2ui_core/a2ui_core.dart' show A2uiMessage;
+import 'package:a2ui_core/a2ui_core.dart' show A2uiRendererAction, AgentToRendererMessage;
 import 'package:ag_ui/ag_ui.dart' as agui;
 import 'package:flutter/foundation.dart' show ValueListenable, ValueNotifier, debugPrint;
-import 'package:genai_primitives/genai_primitives.dart' as gp;
-import 'package:genui/genui.dart';
 
-class AgUiTransport implements Transport {
+class AgUiTransport {
   AgUiTransport({required this.baseUrl, this.catalogDescription, this.uiRenderToolNames = const {}})
     : _client = agui.AgUiClient(config: agui.AgUiClientConfig(baseUrl: baseUrl));
 
@@ -42,7 +40,7 @@ class AgUiTransport implements Transport {
 
   final agui.AgUiClient _client;
   final _textCtrl = StreamController<String>.broadcast();
-  final _msgCtrl = StreamController<A2uiMessage>.broadcast();
+  final _msgCtrl = StreamController<AgentToRendererMessage>.broadcast();
   final _eventCtrl = StreamController<String>.broadcast();
   final _interruptCtrl = StreamController<Map<String, dynamic>>.broadcast();
 
@@ -82,21 +80,22 @@ class AgUiTransport implements Transport {
   /// so we don't re-emit if a TOOL_CALL_RESULT later arrives for them.
   final Set<String> _consumedToolCallIds = {};
 
-  @override
+  /// Completed assistant text bubbles, one string per text message.
   Stream<String> get incomingText => _textCtrl.stream;
 
-  @override
-  Stream<A2uiMessage> get incomingMessages => _msgCtrl.stream;
+  /// The A2UI ops the agent sent, each parsed into a message for a
+  /// `MessageProcessor`.
+  Stream<AgentToRendererMessage> get incomingMessages => _msgCtrl.stream;
 
-  @override
-  Future<void> sendRequest(gp.ChatMessage message) async {
-    final userText = message.text;
-    // genUI converts catalog button taps into ChatMessages that carry a
-    // `UiInteractionPart` (mime: vnd.genui.interaction+json) instead of plain
-    // text. We forward those out-of-band via `forwarded_props.pending_action`
-    // — they are not chat messages and should not be appended to `_history`.
-    final pendingAction = _extractPendingAction(message.parts);
+  /// Sends the user's [message] as a new chat turn.
+  Future<void> sendRequest(String message) => _send(userText: message);
 
+  /// Sends a UI [action] from a rendered surface, such as a catalog `Button`
+  /// tap. Actions are not chat messages: they travel out-of-band via
+  /// `forwarded_props.pending_action` and are not appended to `_history`.
+  Future<void> sendAction(A2uiRendererAction action) => _send(pendingAction: action.toJson());
+
+  Future<void> _send({String userText = '', Map<String, dynamic>? pendingAction}) async {
     if (userText.isEmpty && pendingAction == null) return;
 
     if (userText.isNotEmpty) {
@@ -350,7 +349,7 @@ class AgUiTransport implements Transport {
     // A2UI v0.9 ops are tagged with `version: "v0.9"` at the top level.
     final tagged = {'version': 'v0.9', ...op};
     try {
-      _msgCtrl.add(A2uiMessage.fromJson(tagged));
+      _msgCtrl.add(AgentToRendererMessage.fromJson(tagged));
       _eventCtrl.add(_friendlyOpLabel(op));
     } catch (err, st) {
       // Surface validation errors as a chat bubble so they're visible.
@@ -597,40 +596,6 @@ class AgUiTransport implements Transport {
       m.containsKey('deleteSurface') ||
       m.containsKey('updateDataModel');
 
-  /// Pulls the latest A2UI `action` payload from any [UiInteractionPart]s in
-  /// [parts] (created by genUI's `SurfaceController.handleUiEvent` when the
-  /// user interacts with a rendered surface).
-  ///
-  /// Returns `null` if no interaction parts are present. When multiple
-  /// interactions arrive in a single message (rare), the last one wins —
-  /// `SurfaceController` ships one per event, so this only matters if a
-  /// consumer manually merges messages.
-  Map<String, dynamic>? _extractPendingAction(List<gp.StandardPart> parts) {
-    final interactions = parts.uiInteractionParts;
-    if (interactions.isEmpty) return null;
-
-    Map<String, dynamic>? latest;
-    for (final part in interactions) {
-      try {
-        final decoded = jsonDecode(part.interaction);
-        if (decoded is Map<String, dynamic>) {
-          // genUI wraps the action under `{version: 'v0.9', action: {...}}`.
-          // Unwrap so the backend sees a flat action object.
-          final action = decoded['action'];
-          if (action is Map<String, dynamic>) {
-            latest = action;
-          } else if (decoded.containsKey('name')) {
-            // Tolerate already-unwrapped payloads.
-            latest = decoded;
-          }
-        }
-      } catch (err) {
-        debugPrint('[agui] failed to parse UiInteractionPart: $err');
-      }
-    }
-    return latest;
-  }
-
   /// Best-effort hint about why an op was rejected. The agent's most common
   /// mistakes: uses `type` instead of `component`, wraps properties in `props`,
   /// or invents snake_case component names.
@@ -667,7 +632,6 @@ class AgUiTransport implements Transport {
     return [agui.Context(description: 'Available A2UI components on this Flutter client.', value: catalogDescription!)];
   }
 
-  @override
   void dispose() {
     _textCtrl.close();
     _msgCtrl.close();

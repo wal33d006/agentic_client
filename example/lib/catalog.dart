@@ -1,6 +1,6 @@
 /// A small A2UI catalog for the example app.
 ///
-/// Bundles a few `BasicCatalogItems` primitives plus three custom widgets the
+/// Bundles a few basic `a2ui_flutter` components plus three custom widgets the
 /// agent can emit:
 ///
 ///   • `ProductCard`  — image, title, price tile
@@ -8,9 +8,11 @@
 ///   • `Stat`         — label + big number for KPI-style readouts
 library;
 
+import 'package:a2ui_core/a2ui_core.dart' show CommonSchemas;
+import 'package:a2ui_flutter/a2ui_flutter.dart';
+import 'package:a2ui_flutter/v0_9/basic_catalog.dart' as v0_9;
 import 'package:example/user_profile.dart';
 import 'package:flutter/material.dart';
-import 'package:genui/genui.dart';
 import 'package:json_schema_builder/json_schema_builder.dart';
 
 import 'cart_selector.dart';
@@ -204,33 +206,38 @@ Custom:
 ''';
 
 /// Builds the catalog at startup.
-Catalog buildExampleCatalog() {
-  return Catalog([
-    BasicCatalogItems.text,
-    BasicCatalogItems.column,
-    BasicCatalogItems.row,
-    BasicCatalogItems.divider,
-    BasicCatalogItems.list,
-    // Interactive: taps fire a UserActionEvent → SurfaceController forwards
-    // it through Conversation → AgUiTransport packs it into
-    // `forwarded_props.pending_action` for the backend.
-    BasicCatalogItems.button,
-    userProfileItem,
-    buttonItem,
-    counterItem,
-    // Two-step cart flow: CartSelector (step 1) → CartSummary (step 2),
-    // carried across steps by the backend's shared `cart` state.
-    cartSelectorItem,
-    cartSummaryItem,
-    // Food-ordering flow: RestaurantList (step 1) → RestaurantMenu (step 2) →
-    // CartSummary (step 3, reused), carried by shared `selected_restaurant_id`
-    // and `food_cart` state.
-    restaurantListItem,
-    restaurantMenuItem,
-    _productCard,
-    _weatherTile,
-    _stat,
-  ], catalogId: exampleCatalogId);
+CatalogImplementation buildExampleCatalog() {
+  return v0_9.basicCatalog().derive(
+    catalogId: exampleCatalogId,
+    components: [
+      'Text',
+      'Column',
+      'Row',
+      'Divider',
+      'List',
+      // Interactive: taps fire an action → AguiChat forwards it to
+      // AgUiTransport, which packs it into `forwarded_props.pending_action`
+      // for the backend.
+      'Button',
+    ],
+    addComponents: [
+      userProfileItem,
+      buttonItem,
+      counterItem,
+      // Two-step cart flow: CartSelector (step 1) → CartSummary (step 2),
+      // carried across steps by the backend's shared `cart` state.
+      cartSelectorItem,
+      cartSummaryItem,
+      // Food-ordering flow: RestaurantList (step 1) → RestaurantMenu (step 2) →
+      // CartSummary (step 3, reused), carried by shared `selected_restaurant_id`
+      // and `food_cart` state.
+      restaurantListItem,
+      restaurantMenuItem,
+      _productCard,
+      _weatherTile,
+      _stat,
+    ],
+  );
 }
 
 // ─── ProductCard ────────────────────────────────────────────────────────────
@@ -238,96 +245,77 @@ Catalog buildExampleCatalog() {
 final _productCardSchema = S.object(
   description: 'A product tile with image, name and price.',
   properties: {
-    'name': A2uiSchemas.stringReference(),
-    'price': A2uiSchemas.stringReference(),
-    'description': A2uiSchemas.stringReference(),
-    'imageUrl': A2uiSchemas.stringReference(),
+    'name': CommonSchemas.dynamicString,
+    'price': CommonSchemas.dynamicString,
+    'description': CommonSchemas.dynamicString,
+    'imageUrl': CommonSchemas.dynamicString,
   },
   required: ['name', 'price'],
+  // Accept properties this schema does not declare; the widget ignores them.
+  additionalProperties: true,
 );
 
-final _productCard = CatalogItem(
+final _productCard = ComponentImplementation(
   name: 'ProductCard',
-  dataSchema: _productCardSchema,
-  widgetBuilder: (ctx) {
-    final data = ctx.data as Map<String, Object?>;
-    return BoundString(
-      dataContext: ctx.dataContext,
-      value: data['name'],
-      builder: (context, name) {
-        return BoundString(
-          dataContext: ctx.dataContext,
-          value: data['price'],
-          builder: (context, price) {
-            return BoundString(
-              dataContext: ctx.dataContext,
-              value: data['description'],
-              builder: (context, description) {
-                return BoundString(
-                  dataContext: ctx.dataContext,
-                  value: data['imageUrl'],
-                  builder: (context, imageUrl) {
-                    return SizedBox(
-                      width: 200,
-                      child: Card(
-                        clipBehavior: Clip.antiAlias,
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            if (imageUrl != null && imageUrl.isNotEmpty)
-                              AspectRatio(
-                                aspectRatio: 1,
-                                child: Image.network(
-                                  imageUrl,
-                                  fit: BoxFit.cover,
-                                  errorBuilder: (_, __, ___) =>
-                                      Container(color: Colors.black12, child: const Icon(Icons.image_not_supported)),
-                                ),
-                              ),
-                            Padding(
-                              padding: const EdgeInsets.all(12),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Text(
-                                    name ?? '',
-                                    style: Theme.of(context).textTheme.titleMedium,
-                                    maxLines: 2,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                  if (description != null && description.isNotEmpty) ...[
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      description,
-                                      style: Theme.of(context).textTheme.bodySmall,
-                                      maxLines: 2,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                  ],
-                                  const SizedBox(height: 8),
-                                  Text(
-                                    price ?? '',
-                                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                                      color: Theme.of(context).colorScheme.primary,
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    );
-                  },
-                );
-              },
-            );
-          },
-        );
-      },
+  schema: _productCardSchema,
+  builder: (context, node, props, buildChild) {
+    final name = props.string('name');
+    final price = props.string('price');
+    final description = props.string('description');
+    final imageUrl = props.string('imageUrl');
+    return SizedBox(
+      width: 200,
+      child: Card(
+        clipBehavior: Clip.antiAlias,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (imageUrl != null && imageUrl.isNotEmpty)
+              AspectRatio(
+                aspectRatio: 1,
+                child: Image.network(
+                  imageUrl,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) =>
+                      Container(color: Colors.black12, child: const Icon(Icons.image_not_supported)),
+                ),
+              ),
+            Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    name ?? '',
+                    style: Theme.of(context).textTheme.titleMedium,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  if (description != null && description.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      description,
+                      style: Theme.of(context).textTheme.bodySmall,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                  const SizedBox(height: 8),
+                  Text(
+                    price ?? '',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      color: Theme.of(context).colorScheme.primary,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   },
 );
@@ -337,66 +325,52 @@ final _productCard = CatalogItem(
 final _weatherTileSchema = S.object(
   description: 'A weather summary tile for a single city.',
   properties: {
-    'city': A2uiSchemas.stringReference(),
-    'temperature': A2uiSchemas.stringReference(),
-    'condition': A2uiSchemas.stringReference(),
+    'city': CommonSchemas.dynamicString,
+    'temperature': CommonSchemas.dynamicString,
+    'condition': CommonSchemas.dynamicString,
   },
   required: ['city', 'temperature', 'condition'],
+  // Accept properties this schema does not declare; the widget ignores them.
+  additionalProperties: true,
 );
 
-final _weatherTile = CatalogItem(
+final _weatherTile = ComponentImplementation(
   name: 'WeatherTile',
-  dataSchema: _weatherTileSchema,
-  widgetBuilder: (ctx) {
-    final data = ctx.data as Map<String, Object?>;
-    return BoundString(
-      dataContext: ctx.dataContext,
-      value: data['city'],
-      builder: (context, city) {
-        return BoundString(
-          dataContext: ctx.dataContext,
-          value: data['temperature'],
-          builder: (context, temperature) {
-            return BoundString(
-              dataContext: ctx.dataContext,
-              value: data['condition'],
-              builder: (context, condition) {
-                return Container(
-                  width: 180,
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    gradient: const LinearGradient(
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                      colors: [Color(0xFF42A5F5), Color(0xFF1E88E5)],
-                    ),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(_weatherIcon(condition), color: Colors.white, size: 36),
-                      const SizedBox(height: 12),
-                      Text(
-                        city ?? '',
-                        style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w500),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        temperature ?? '',
-                        style: const TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.w700),
-                      ),
-                      if (condition != null && condition.isNotEmpty)
-                        Text(condition, style: const TextStyle(color: Colors.white70, fontSize: 12)),
-                    ],
-                  ),
-                );
-              },
-            );
-          },
-        );
-      },
+  schema: _weatherTileSchema,
+  builder: (context, node, props, buildChild) {
+    final city = props.string('city');
+    final temperature = props.string('temperature');
+    final condition = props.string('condition');
+    return Container(
+      width: 180,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Color(0xFF42A5F5), Color(0xFF1E88E5)],
+        ),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(_weatherIcon(condition), color: Colors.white, size: 36),
+          const SizedBox(height: 12),
+          Text(
+            city ?? '',
+            style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w500),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            temperature ?? '',
+            style: const TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.w700),
+          ),
+          if (condition != null && condition.isNotEmpty)
+            Text(condition, style: const TextStyle(color: Colors.white70, fontSize: 12)),
+        ],
+      ),
     );
   },
 );
@@ -420,45 +394,33 @@ IconData _weatherIcon(String? condition) {
 
 final _statSchema = S.object(
   description: 'A KPI readout: large value with a small label below.',
-  properties: {'label': A2uiSchemas.stringReference(), 'value': A2uiSchemas.stringReference()},
+  properties: {'label': CommonSchemas.dynamicString, 'value': CommonSchemas.dynamicString},
   required: ['label', 'value'],
+  // Accept properties this schema does not declare; the widget ignores them.
+  additionalProperties: true,
 );
 
-final _stat = CatalogItem(
+final _stat = ComponentImplementation(
   name: 'Stat',
-  dataSchema: _statSchema,
-  widgetBuilder: (ctx) {
-    final data = ctx.data as Map<String, Object?>;
-    return BoundString(
-      dataContext: ctx.dataContext,
-      value: data['label'],
-      builder: (context, label) {
-        return BoundString(
-          dataContext: ctx.dataContext,
-          value: data['value'],
-          builder: (context, value) {
-            return Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              decoration: BoxDecoration(
-                border: Border.all(color: Theme.of(context).dividerColor),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    value ?? '',
-                    style: Theme.of(context).textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.w700),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(label ?? '', style: Theme.of(context).textTheme.bodySmall),
-                ],
-              ),
-            );
-          },
-        );
-      },
+  schema: _statSchema,
+  builder: (context, node, props, buildChild) {
+    final label = props.string('label');
+    final value = props.string('value');
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        border: Border.all(color: Theme.of(context).dividerColor),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(value ?? '', style: Theme.of(context).textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.w700)),
+          const SizedBox(height: 2),
+          Text(label ?? '', style: Theme.of(context).textTheme.bodySmall),
+        ],
+      ),
     );
   },
 );

@@ -2,16 +2,16 @@
 
 A drop-in Flutter chat widget for [AG-UI](https://docs.ag-ui.com)-compatible
 agent backends that renders the agent's generative-UI surfaces ([A2UI v0.9](https://a2ui.org))
-inline using a [genui](https://pub.dev/packages/genui) catalog of your own
-Flutter widgets.
+inline using an [`a2ui_flutter`](https://pub.dev/packages/a2ui_flutter) catalog
+of your own Flutter widgets.
 
 ![agentic_client example gif](assets/food_ordering.gif)
 
 ## Features
 
 - **One widget, full chat surface**: `AguiChat` owns the transport, the
-  [`SurfaceController`][SurfaceController], and the conversation log; just give
-  it a `baseUrl` and a `Catalog`.
+  [`MessageProcessor`][MessageProcessor], and the conversation log; just give
+  it a `baseUrl` and a `CatalogImplementation`.
 - **Streamed assistant text** rendered as chat bubbles with a thinking
   indicator while a turn is in flight.
 - **Generative UI inline** via two configurable ingest paths:
@@ -29,8 +29,8 @@ Flutter widgets.
   is round-tripped back as `SimpleRunAgentInput.state` so stateless agents
   can resume across runs. Wire `onStateChanged` to observe changes or
   render debug UIs over them.
-- **UI interaction round-trip**: catalog buttons (and any other
-  `UserActionEvent`-firing widgets) become an out-of-band action signal.
+- **UI interaction round-trip**: catalog buttons (and any other widgets that
+  dispatch an A2UI action) become an out-of-band action signal.
   The transport packs the action into `forwarded_props.pending_action` so
   your agent can handle it via a pre-LLM node or middleware without
   treating the click as a chat message.
@@ -42,7 +42,7 @@ Flutter widgets.
   card and resumes the paused run with the user's Approve / Reject decision —
   no extra configuration required.
 
-[SurfaceController]: https://pub.dev/documentation/genui/latest/genui/SurfaceController-class.html
+[MessageProcessor]: https://pub.dev/documentation/a2ui_core/latest/a2ui_core/MessageProcessor-class.html
 
 ## Getting started
 
@@ -59,18 +59,18 @@ Add the package to your app's `pubspec.yaml`:
 ```yaml
 dependencies:
   agentic_client: ^0.0.1
-  genui: ^0.9.2
+  a2ui_flutter: ^0.1.0
 ```
 
 ## Usage
 
-Build a [`Catalog`][Catalog] of the widgets your agent is allowed to render,
-then drop `AguiChat` into any `Scaffold`:
+Build a [`CatalogImplementation`][CatalogImplementation] of the widgets your
+agent is allowed to render, then drop `AguiChat` into any `Scaffold`:
 
 ```dart
+import 'package:a2ui_flutter/v0_9/basic_catalog.dart';
 import 'package:agentic_client/agentic_client.dart';
 import 'package:flutter/material.dart';
-import 'package:genui/genui.dart';
 
 class ChatScreen extends StatelessWidget {
   const ChatScreen({super.key});
@@ -81,14 +81,12 @@ class ChatScreen extends StatelessWidget {
       appBar: AppBar(title: const Text('Chat')),
       body: AguiChat(
         baseUrl: 'http://localhost:8123',
-        catalog: Catalog(
-          [
-            BasicCatalogItems.text,
-            BasicCatalogItems.column,
-            BasicCatalogItems.row,
-            // …plus your own CatalogItems
-          ],
+        catalog: basicCatalog().derive(
           catalogId: 'my-app.catalog',
+          components: ['Text', 'Column', 'Row'],
+          addComponents: [
+            // …plus your own ComponentImplementations
+          ],
         ),
         catalogDescription: '... optional A2UI prompt context ...',
         hintText: 'Ask me anything…',
@@ -125,8 +123,8 @@ via `STATE_SNAPSHOT` / `STATE_DELTA` (RFC 6902 JSON Patch) and echoes the
 mirror back as `SimpleRunAgentInput.state` on every turn. The mirror is
 read-only on the client; the backend owns all writes.
 
-When a user taps an A2UI `Button` (or any widget that fires a
-`UserActionEvent`), the transport packs the action into
+When a user taps an A2UI `Button` (or any widget that dispatches an A2UI
+action), the transport packs the action into
 `forwarded_props.pending_action` instead of treating it as a chat message.
 A backend pre-LLM hook can read `state["pending_action"]`, mutate state,
 and either short-circuit the graph (silent) or inject a synthetic
@@ -185,10 +183,11 @@ cd example
 flutter run --dart-define=AGENT_URL=http://localhost:8123
 ```
 
-[Catalog]: https://pub.dev/documentation/genui/latest/genui/Catalog-class.html
+[CatalogImplementation]: https://pub.dev/documentation/a2ui_flutter/latest/a2ui_flutter/CatalogImplementation.html
 
 ## Additional information
 
 - Built on top of [`ag_ui`](https://pub.dev/packages/ag_ui) for transport and
-  [`genui`](https://pub.dev/packages/genui) for A2UI surface rendering.
+  [`a2ui_flutter`](https://pub.dev/packages/a2ui_flutter) for A2UI surface
+  rendering.
 - Issues and contributions are welcome on the repository.

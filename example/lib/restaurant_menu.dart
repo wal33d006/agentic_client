@@ -1,5 +1,6 @@
+import 'package:a2ui_core/a2ui_core.dart' show CommonSchemas;
+import 'package:a2ui_flutter/a2ui_flutter.dart';
 import 'package:flutter/material.dart';
-import 'package:genui/genui.dart';
 import 'package:json_schema_builder/json_schema_builder.dart';
 
 import 'food_theme.dart';
@@ -19,77 +20,58 @@ final _restaurantMenuSchema = S.object(
       'of {id, name, price, qty} (qty = amount in cart); `cartCount` and '
       '`cartTotal` summarise the cart.',
   properties: {
-    'restaurantName': A2uiSchemas.stringReference(),
-    'items': A2uiSchemas.listOrReference(
-      items: S.object(
-        properties: {
-          'id': S.string(),
-          'name': S.string(),
-          'price': S.number(),
-          'qty': S.integer(),
-        },
-      ),
+    'restaurantName': CommonSchemas.dynamicString,
+    'items': S.combined(
+      anyOf: [
+        S.list(
+          items: S.object(
+            properties: {
+              'id': S.string(),
+              'name': S.string(),
+              'price': S.number(),
+              'qty': S.integer(),
+            },
+          ),
+        ),
+        CommonSchemas.dataBinding,
+        CommonSchemas.functionCall,
+      ],
     ),
-    'cartCount': A2uiSchemas.stringReference(),
-    'cartTotal': A2uiSchemas.stringReference(),
+    'cartCount': CommonSchemas.dynamicString,
+    'cartTotal': CommonSchemas.dynamicString,
   },
   required: ['items'],
+  // Accept properties this schema does not declare; the widget ignores them.
+  additionalProperties: true,
 );
 
-final restaurantMenuItem = CatalogItem(
+final restaurantMenuItem = ComponentImplementation(
   name: 'RestaurantMenu',
-  dataSchema: _restaurantMenuSchema,
-  widgetBuilder: (ctx) {
-    final data = ctx.data as Map<String, Object?>;
-    return BoundString(
-      dataContext: ctx.dataContext,
-      value: data['restaurantName'],
-      builder: (context, restaurantName) {
-        return BoundList(
-          dataContext: ctx.dataContext,
-          value: data['items'],
-          builder: (context, items) {
-            return BoundString(
-              dataContext: ctx.dataContext,
-              value: data['cartCount'],
-              builder: (context, cartCount) {
-                return BoundString(
-                  dataContext: ctx.dataContext,
-                  value: data['cartTotal'],
-                  builder: (context, cartTotal) => _RestaurantMenuView(
-                    restaurantName: restaurantName ?? 'Menu',
-                    items: _coerceItems(items),
-                    cartCount: int.tryParse(cartCount ?? '0') ?? 0,
-                    cartTotal: cartTotal ?? r'$0.00',
-                    onAdd: (id) => ctx.dispatchEvent(
-                      UserActionEvent(
-                        name: 'addToCart',
-                        sourceComponentId: ctx.id,
-                        context: {'item_id': id},
-                      ),
-                    ),
-                    onRemove: (id) => ctx.dispatchEvent(
-                      UserActionEvent(
-                        name: 'removeFromCart',
-                        sourceComponentId: ctx.id,
-                        context: {'item_id': id},
-                      ),
-                    ),
-                    onBack: () => ctx.dispatchEvent(
-                      UserActionEvent(name: 'listRestaurants', sourceComponentId: ctx.id),
-                    ),
-                    onCheckout: () => ctx.dispatchEvent(
-                      UserActionEvent(name: 'viewCheckout', sourceComponentId: ctx.id),
-                    ),
-                  ),
-                );
-              },
-            );
-          },
-        );
+  schema: _restaurantMenuSchema,
+  builder: (context, node, props, buildChild) => _RestaurantMenuView(
+    restaurantName: props.string('restaurantName') ?? 'Menu',
+    items: _coerceItems(props.list('items')),
+    cartCount: int.tryParse(props.string('cartCount') ?? '0') ?? 0,
+    cartTotal: props.string('cartTotal') ?? r'$0.00',
+    onAdd: (id) => node.context?.dispatchAction({
+      'event': {
+        'name': 'addToCart',
+        'context': {'item_id': id},
       },
-    );
-  },
+    }),
+    onRemove: (id) => node.context?.dispatchAction({
+      'event': {
+        'name': 'removeFromCart',
+        'context': {'item_id': id},
+      },
+    }),
+    onBack: () => node.context?.dispatchAction({
+      'event': {'name': 'listRestaurants'},
+    }),
+    onCheckout: () => node.context?.dispatchAction({
+      'event': {'name': 'viewCheckout'},
+    }),
+  ),
 );
 
 class MenuItem {

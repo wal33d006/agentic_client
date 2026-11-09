@@ -1,5 +1,6 @@
+import 'package:a2ui_core/a2ui_core.dart' show CommonSchemas;
+import 'package:a2ui_flutter/a2ui_flutter.dart';
 import 'package:flutter/material.dart';
-import 'package:genui/genui.dart';
 import 'package:json_schema_builder/json_schema_builder.dart';
 
 import 'cart_selector.dart' show CartItem;
@@ -20,62 +21,47 @@ final _cartSummarySchema = S.object(
       '`status` is "pending" or "paid"; `payAction` is the action name the '
       'Pay button fires (defaults to "cartPay").',
   properties: {
-    'items': A2uiSchemas.listOrReference(
-      items: S.object(
-        properties: {
-          'id': S.string(),
-          'name': S.string(),
-          'price': S.number(),
-          'qty': S.integer(),
-        },
-      ),
+    'items': S.combined(
+      anyOf: [
+        S.list(
+          items: S.object(
+            properties: {
+              'id': S.string(),
+              'name': S.string(),
+              'price': S.number(),
+              'qty': S.integer(),
+            },
+          ),
+        ),
+        CommonSchemas.dataBinding,
+        CommonSchemas.functionCall,
+      ],
     ),
-    'total': A2uiSchemas.stringReference(),
-    'status': A2uiSchemas.stringReference(),
-    'payAction': A2uiSchemas.stringReference(),
+    'total': CommonSchemas.dynamicString,
+    'status': CommonSchemas.dynamicString,
+    'payAction': CommonSchemas.dynamicString,
   },
   required: ['items', 'total'],
+  // Accept properties this schema does not declare; the widget ignores them.
+  additionalProperties: true,
 );
 
-final cartSummaryItem = CatalogItem(
+final cartSummaryItem = ComponentImplementation(
   name: 'CartSummary',
-  dataSchema: _cartSummarySchema,
-  widgetBuilder: (ctx) {
-    final data = ctx.data as Map<String, Object?>;
-    return BoundList(
-      dataContext: ctx.dataContext,
-      value: data['items'],
-      builder: (context, items) {
-        return BoundString(
-          dataContext: ctx.dataContext,
-          value: data['total'],
-          builder: (context, total) {
-            return BoundString(
-              dataContext: ctx.dataContext,
-              value: data['status'],
-              builder: (context, status) {
-                return BoundString(
-                  dataContext: ctx.dataContext,
-                  value: data['payAction'],
-                  builder: (context, payAction) => _CartSummaryView(
-                    items: _coerceItems(items),
-                    total: total ?? r'$0.00',
-                    paid: status == 'paid',
-                    // Defaults to the simple-cart action; the food flow sets
-                    // this to "payOrder" so Pay routes to its own backend tool.
-                    onPay: () => ctx.dispatchEvent(
-                      UserActionEvent(
-                        name: (payAction == null || payAction.isEmpty) ? 'cartPay' : payAction,
-                        sourceComponentId: ctx.id,
-                      ),
-                    ),
-                  ),
-                );
-              },
-            );
-          },
-        );
-      },
+  schema: _cartSummarySchema,
+  builder: (context, node, props, buildChild) {
+    final payAction = props.string('payAction');
+    return _CartSummaryView(
+      items: _coerceItems(props.list('items')),
+      total: props.string('total') ?? r'$0.00',
+      paid: props.string('status') == 'paid',
+      // Defaults to the simple-cart action; the food flow sets
+      // this to "payOrder" so Pay routes to its own backend tool.
+      onPay: () => node.context?.dispatchAction({
+        'event': {
+          'name': (payAction == null || payAction.isEmpty) ? 'cartPay' : payAction,
+        },
+      }),
     );
   },
 );

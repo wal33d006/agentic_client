@@ -1,30 +1,22 @@
+import 'package:a2ui_core/a2ui_core.dart' show CommonSchemas;
+import 'package:a2ui_flutter/a2ui_flutter.dart';
 import 'package:flutter/material.dart';
-import 'package:genui/genui.dart';
 import 'package:json_schema_builder/json_schema_builder.dart';
 
 /// Schema = the prop sockets this widget reads. Nothing more.
 /// Adding more fields on the backend is a no-op here until you decide
 /// to render them.
 final _userProfileSchema = S.object(
-  properties: {'name': A2uiSchemas.stringReference(), 'email': A2uiSchemas.stringReference()},
+  properties: {'name': CommonSchemas.dynamicString, 'email': CommonSchemas.dynamicString},
   required: ['name', 'email'],
+  additionalProperties: true,
 );
 
-final userProfileItem = CatalogItem(
+final userProfileItem = ComponentImplementation(
   name: 'UserProfile',
-  dataSchema: _userProfileSchema,
-  widgetBuilder: (ctx) {
-    final data = ctx.data as Map<String, Object?>;
-    return BoundString(
-      dataContext: ctx.dataContext,
-      value: data['name'],
-      builder: (_, name) => BoundString(
-        dataContext: ctx.dataContext,
-        value: data['email'],
-        builder: (_, email) => _UserProfileTile(name: name ?? '', email: email ?? ''),
-      ),
-    );
-  },
+  schema: _userProfileSchema,
+  builder: (context, node, props, buildChild) =>
+      _UserProfileTile(name: props.string('name') ?? '', email: props.string('email') ?? ''),
 );
 
 class _UserProfileTile extends StatelessWidget {

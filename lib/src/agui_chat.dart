@@ -1,19 +1,32 @@
-/// A drop-in AG-UI + genui chat experience for Flutter.
+/// A drop-in AG-UI + A2UI chat experience for Flutter.
 ///
 /// Plug `AguiChat` into any Flutter app and it will:
 ///   • talk to an AG-UI-compatible agent backend over HTTP
 ///   • stream assistant text into chat bubbles
 ///   • render generative-UI surfaces (A2UI v0.9 ops) inline in the chat,
-///     using the [Catalog] of widgets you provide
+///     using the [CatalogImplementation] of widgets you provide
 ///
-/// The widget owns the [SurfaceController], the AG-UI transport and the
-/// [Conversation] for its lifetime — no setup beyond passing a `baseUrl`
-/// and a `catalog`. Wrap it in whatever shell (Scaffold / AppBar / theme /
-/// drawer) your app uses.
+/// The widget owns the [MessageProcessor] and the AG-UI transport for its
+/// lifetime — no setup beyond passing a `baseUrl` and a `catalog`. Wrap it
+/// in whatever shell (Scaffold / AppBar / theme / drawer) your app uses.
 library;
 
+import 'dart:async';
+
+import 'package:a2ui_core/a2ui_core.dart'
+    show
+        A2uiRendererAction,
+        A2uiRendererError,
+        AgentToRendererMessage,
+        AgentToRendererMessagePayload,
+        MessageProcessor,
+        Subscription,
+        SurfaceModel,
+        ValidationConfig;
+import 'package:a2ui_flutter/a2ui_flutter.dart';
+import 'package:a2ui_flutter/v0_9/basic_catalog.dart' show A2uiMarkdown;
 import 'package:flutter/material.dart';
-import 'package:genui/genui.dart';
+import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 
 import 'agui_transport.dart';
 
@@ -41,9 +54,11 @@ class AguiChat extends StatefulWidget {
   /// The chat POSTs each turn to `"$baseUrl/"`.
   final String baseUrl;
 
-  /// The genui [Catalog] of Flutter widgets the agent can render.
-  /// Component names emitted by the agent must match item names in this catalog.
-  final Catalog catalog;
+  /// The [CatalogImplementation] of Flutter widgets the agent can render.
+  /// The agent's `createSurface` must name this catalog's `id` as its
+  /// `catalogId`, and component names emitted by the agent must match
+  /// component names in this catalog.
+  final CatalogImplementation catalog;
 
   /// Optional free-text description of the catalog, shipped to the agent on
   /// every request via the AG-UI `context` field. Use this to teach the
@@ -110,9 +125,9 @@ class _AssistantBubble extends _ChatItem {
 }
 
 class _SurfaceItem extends _ChatItem {
-  const _SurfaceItem(this.surfaceId);
+  const _SurfaceItem(this.surface);
 
-  final String surfaceId;
+  final SurfaceModel<ComponentImplementation> surface;
 }
 
 /// A run of consecutive agent events. Events arrive in batches between
@@ -138,9 +153,11 @@ class _InterruptItem extends _ChatItem {
 // ─── State ──────────────────────────────────────────────────────────────────
 
 class _AguiChatState extends State<AguiChat> {
-  late final SurfaceController _controller;
+  late final MessageProcessor<ComponentImplementation> _processor;
   late final AgUiTransport _transport;
-  late final Conversation _conversation;
+  late final List<Subscription> _processorSubscriptions;
+  late final StreamSubscription<AgentToRendererMessage> _messageSubscription;
+  late final StreamSubscription<String> _textSubscription;
   final _textController = TextEditingController();
   final _scrollController = ScrollController();
   final List<_ChatItem> _items = [];
@@ -149,20 +166,31 @@ class _AguiChatState extends State<AguiChat> {
   @override
   void initState() {
     super.initState();
-    _controller = SurfaceController(catalogs: [widget.catalog]);
+    _processor = MessageProcessor<ComponentImplementation>(
+      catalogs: [widget.catalog],
+      // A surface streams in over several ops, which the strict graph checks
+      // would reject.
+      validationConfig: ValidationConfig.relaxed,
+      // Report a rejected op on onError and keep applying the others.
+      reportErrorsOnly: true,
+    );
     _transport = AgUiTransport(
       baseUrl: widget.baseUrl,
       catalogDescription: widget.catalogDescription,
       uiRenderToolNames: widget.uiRenderToolNames,
     );
-    _conversation = Conversation(controller: _controller, transport: _transport);
-    _conversation.events.listen(_onEvent);
-    // genUI's Conversation tracks waiting state on its `state` notifier (set
-    // to false in a try/finally around transport.sendRequest). Events alone
-    // are not enough — a click that only fires updateDataModel ops emits no
-    // ConversationComponentsUpdated, so listening to events leaves the
-    // loader spinning. The notifier is the authoritative source.
-    _conversation.state.addListener(_onConversationStateChanged);
+    // The transport's ops build the surfaces; the processor reports surfaces
+    // coming and going and the actions users take on them.
+    _processorSubscriptions = [
+      _processor.model.onSurfaceCreated.subscribe(_onSurfaceCreated),
+      _processor.model.onSurfaceDeleted.subscribe(_onSurfaceDeleted),
+      _processor.model.onAction.subscribe(_onAction),
+      _processor.model.onError.subscribe(_onError),
+    ];
+    _messageSubscription = _transport.incomingMessages.listen(
+      (message) => _processor.processMessages(AgentToRendererMessagePayload.of(message)),
+    );
+    _textSubscription = _transport.incomingText.listen(_onText);
     if (widget.showAgentEvents) {
       _transport.agentEvents.listen(_onAgentEvent);
     }
@@ -174,8 +202,22 @@ class _AguiChatState extends State<AguiChat> {
     }
   }
 
-  void _onConversationStateChanged() {
-    final isWaiting = _conversation.state.value.isWaiting;
+  /// Sends one request through the transport with the loader up until it
+  /// completes, and shows a failure as an assistant bubble.
+  Future<void> _request(Future<void> Function() send) async {
+    _setWaiting(true);
+    try {
+      await send();
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _items.add(_AssistantBubble('⚠️ $error')));
+      _scrollToEnd();
+    } finally {
+      if (mounted) _setWaiting(false);
+    }
+  }
+
+  void _setWaiting(bool isWaiting) {
     if (isWaiting != _waiting) {
       setState(() => _waiting = isWaiting);
       if (!isWaiting) _scrollToEnd();
@@ -211,8 +253,8 @@ class _AguiChatState extends State<AguiChat> {
   }
 
   /// User answered an approval card. Send the decision back via the transport's
-  /// resume path (NOT the conversation — this continues the paused graph), and
-  /// manage the loader ourselves since we bypass `Conversation.sendRequest`.
+  /// resume path (NOT a new turn — this continues the paused graph), and
+  /// manage the loader around it.
   void _decide(_InterruptItem item, bool approved) {
     if (item.resolved) return;
     setState(() {
@@ -231,38 +273,49 @@ class _AguiChatState extends State<AguiChat> {
     if (widget.onStateChanged != null) {
       _transport.state.removeListener(_onStateChanged);
     }
-    _conversation.state.removeListener(_onConversationStateChanged);
-    _conversation.dispose();
+    for (final subscription in _processorSubscriptions) {
+      subscription.unsubscribe();
+    }
+    _messageSubscription.cancel();
+    _textSubscription.cancel();
+    _processor.dispose();
     _transport.dispose();
-    _controller.dispose();
     _textController.dispose();
     _scrollController.dispose();
     super.dispose();
   }
 
-  void _onEvent(ConversationEvent event) {
+  void _onText(String text) {
+    setState(() => _items.add(_AssistantBubble(text)));
+    _scrollToEnd();
+  }
+
+  // There is no event for component updates: the on-screen A2uiSurface
+  // rebuilds itself.
+  void _onSurfaceCreated(SurfaceModel<ComponentImplementation> surface) {
     setState(() {
-      switch (event) {
-        case ConversationContentReceived(:final text):
-          _items.add(_AssistantBubble(text));
-        case ConversationSurfaceAdded(:final surfaceId):
-          if (!_items.any((i) => i is _SurfaceItem && i.surfaceId == surfaceId)) {
-            _items.add(_SurfaceItem(surfaceId));
-          }
-        case ConversationSurfaceRemoved(:final surfaceId):
-          _items.removeWhere((i) => i is _SurfaceItem && i.surfaceId == surfaceId);
-        case ConversationError(:final error):
-          _items.add(_AssistantBubble('⚠️ $error'));
-        case ConversationWaiting():
-        case ConversationComponentsUpdated():
-          // ConversationWaiting / waiting-cleared transitions are handled
-          // by the conversation state notifier listener — _onEvent doesn't
-          // touch _waiting. ComponentsUpdated requires no state change here:
-          // the on-screen Surface auto-rebuilds via its SurfaceContext.
-          break;
+      if (!_items.any((i) => i is _SurfaceItem && i.surface.id == surface.id)) {
+        _items.add(_SurfaceItem(surface));
       }
     });
     _scrollToEnd();
+  }
+
+  void _onSurfaceDeleted(String surfaceId) {
+    setState(() => _items.removeWhere((i) => i is _SurfaceItem && i.surface.id == surfaceId));
+    _scrollToEnd();
+  }
+
+  /// A user acted on a surface, e.g. tapped a catalog `Button`. The transport
+  /// forwards the action to the agent as `forwarded_props.pending_action`.
+  void _onAction(A2uiRendererAction action) {
+    _request(() => _transport.sendAction(action));
+  }
+
+  /// Ops the processor rejected and errors surfaces hit while rendering. They
+  /// are not sent to the agent; log them for debugging.
+  void _onError(A2uiRendererError error) {
+    debugPrint('[agui] A2UI error ${error.code} on surface ${error.surfaceId}: ${error.message}');
   }
 
   void _send() {
@@ -273,7 +326,7 @@ class _AguiChatState extends State<AguiChat> {
       _waiting = true;
     });
     _textController.clear();
-    _conversation.sendRequest(ChatMessage.user(text));
+    _request(() => _transport.sendRequest(text));
     _scrollToEnd();
   }
 
@@ -344,7 +397,7 @@ class _AguiChatState extends State<AguiChat> {
               return switch (item) {
                 _UserBubble(:final text) => _Bubble(text: text, fromUser: true),
                 _AssistantBubble(:final text) => _Bubble(text: text, fromUser: false),
-                _SurfaceItem(:final surfaceId) => _SurfaceBubble(surfaceContext: _controller.contextFor(surfaceId)),
+                _SurfaceItem(:final surface) => _SurfaceBubble(surface: surface),
                 _EventGroup() => _EventGroupTile(key: ObjectKey(item), group: item),
                 _InterruptItem() => _InterruptCard(
                   key: ObjectKey(item),
@@ -403,9 +456,9 @@ class _Bubble extends StatelessWidget {
 }
 
 class _SurfaceBubble extends StatelessWidget {
-  const _SurfaceBubble({required this.surfaceContext});
+  const _SurfaceBubble({required this.surface});
 
-  final SurfaceContext surfaceContext;
+  final SurfaceModel<ComponentImplementation> surface;
 
   @override
   Widget build(BuildContext context) {
@@ -419,10 +472,19 @@ class _SurfaceBubble extends StatelessWidget {
           border: Border.all(color: Theme.of(context).dividerColor),
           borderRadius: BorderRadius.circular(12),
         ),
-        child: Surface(surfaceContext: surfaceContext),
+        // Render the Markdown in the surface's Text components.
+        child: A2uiMarkdown(
+          builder: _markdown,
+          child: A2uiSurface(key: ObjectKey(surface), surface: surface),
+        ),
       ),
     );
   }
+
+  static Widget _markdown(BuildContext context, String markdown, TextStyle style) => MarkdownBody(
+    data: markdown,
+    styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(p: style),
+  );
 }
 
 /// An approval prompt for a human-in-the-loop `interrupt(...)`. Reads its text

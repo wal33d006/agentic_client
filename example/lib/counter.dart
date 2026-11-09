@@ -1,37 +1,31 @@
+import 'package:a2ui_core/a2ui_core.dart' show CommonSchemas;
+import 'package:a2ui_flutter/a2ui_flutter.dart';
 import 'package:flutter/material.dart';
-import 'package:genui/genui.dart';
 import 'package:json_schema_builder/json_schema_builder.dart';
 
 /// Schema = the prop sockets this widget reads. Nothing more.
 /// Adding more fields on the backend is a no-op here until you decide
 /// to render them.
 final _counterSchema = S.object(
-  properties: {'count': A2uiSchemas.stringReference()},
+  properties: {'count': CommonSchemas.dynamicString},
   required: ['count'],
+  additionalProperties: true,
 );
 
-final counterItem = CatalogItem(
+final counterItem = ComponentImplementation(
   name: 'MyCounter',
-  dataSchema: _counterSchema,
-  widgetBuilder: (ctx) {
-    final data = ctx.data as Map<String, Object?>;
-    return BoundString(
-      dataContext: ctx.dataContext,
-      value: data['count'],
-      builder: (context, count) => _CounterTile(
-        count: count ?? '0',
-        // Taps fire `UserActionEvent`s that genUI's SurfaceController converts
-        // into ChatMessages with a UiInteractionPart, which the transport
-        // packs into `forwarded_props.pending_action` for the backend.
-        onIncrement: () => ctx.dispatchEvent(
-          UserActionEvent(name: 'increment', sourceComponentId: ctx.id),
-        ),
-        onDecrement: () => ctx.dispatchEvent(
-          UserActionEvent(name: 'decrement', sourceComponentId: ctx.id),
-        ),
-      ),
-    );
-  },
+  schema: _counterSchema,
+  builder: (context, node, props, buildChild) => _CounterTile(
+    count: props.string('count') ?? '0',
+    // Taps dispatch actions that AguiChat hands to the transport, which
+    // packs them into `forwarded_props.pending_action` for the backend.
+    onIncrement: () => node.context?.dispatchAction({
+      'event': {'name': 'increment'},
+    }),
+    onDecrement: () => node.context?.dispatchAction({
+      'event': {'name': 'decrement'},
+    }),
+  ),
 );
 
 class _CounterTile extends StatelessWidget {

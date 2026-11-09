@@ -1,5 +1,6 @@
+import 'package:a2ui_core/a2ui_core.dart' show CommonSchemas;
+import 'package:a2ui_flutter/a2ui_flutter.dart';
 import 'package:flutter/material.dart';
-import 'package:genui/genui.dart';
 import 'package:json_schema_builder/json_schema_builder.dart';
 
 import 'food_theme.dart';
@@ -15,40 +16,40 @@ final _restaurantListSchema = S.object(
       'Step 1 of the food-ordering flow: a tappable list of restaurants. '
       '`restaurants` is a list of {id, name, cuisine, rating}.',
   properties: {
-    'restaurants': A2uiSchemas.listOrReference(
-      items: S.object(
-        properties: {
-          'id': S.string(),
-          'name': S.string(),
-          'cuisine': S.string(),
-          'rating': S.string(),
-        },
-      ),
+    'restaurants': S.combined(
+      anyOf: [
+        S.list(
+          items: S.object(
+            properties: {
+              'id': S.string(),
+              'name': S.string(),
+              'cuisine': S.string(),
+              'rating': S.string(),
+            },
+          ),
+        ),
+        CommonSchemas.dataBinding,
+        CommonSchemas.functionCall,
+      ],
     ),
   },
   required: ['restaurants'],
+  // Accept properties this schema does not declare; the widget ignores them.
+  additionalProperties: true,
 );
 
-final restaurantListItem = CatalogItem(
+final restaurantListItem = ComponentImplementation(
   name: 'RestaurantList',
-  dataSchema: _restaurantListSchema,
-  widgetBuilder: (ctx) {
-    final data = ctx.data as Map<String, Object?>;
-    return BoundList(
-      dataContext: ctx.dataContext,
-      value: data['restaurants'],
-      builder: (context, restaurants) => _RestaurantListView(
-        restaurants: _coerceRestaurants(restaurants),
-        onSelect: (id) => ctx.dispatchEvent(
-          UserActionEvent(
-            name: 'selectRestaurant',
-            sourceComponentId: ctx.id,
-            context: {'restaurant_id': id},
-          ),
-        ),
-      ),
-    );
-  },
+  schema: _restaurantListSchema,
+  builder: (context, node, props, buildChild) => _RestaurantListView(
+    restaurants: _coerceRestaurants(props.list('restaurants')),
+    onSelect: (id) => node.context?.dispatchAction({
+      'event': {
+        'name': 'selectRestaurant',
+        'context': {'restaurant_id': id},
+      },
+    }),
+  ),
 );
 
 class Restaurant {

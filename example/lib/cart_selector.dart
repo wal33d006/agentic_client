@@ -1,5 +1,6 @@
+import 'package:a2ui_core/a2ui_core.dart' show CommonSchemas;
+import 'package:a2ui_flutter/a2ui_flutter.dart';
 import 'package:flutter/material.dart';
-import 'package:genui/genui.dart';
 import 'package:json_schema_builder/json_schema_builder.dart';
 
 /// Step 1 of the two-step cart flow.
@@ -17,51 +18,45 @@ final _cartSelectorSchema = S.object(
       'Proceed-to-Checkout button. `items` is a list of '
       '{id, name, price, selected}.',
   properties: {
-    'items': A2uiSchemas.listOrReference(
-      items: S.object(
-        properties: {
-          'id': S.string(),
-          'name': S.string(),
-          'price': S.number(),
-          'selected': S.boolean(),
-        },
-      ),
+    'items': S.combined(
+      anyOf: [
+        S.list(
+          items: S.object(
+            properties: {
+              'id': S.string(),
+              'name': S.string(),
+              'price': S.number(),
+              'selected': S.boolean(),
+            },
+          ),
+        ),
+        CommonSchemas.dataBinding,
+        CommonSchemas.functionCall,
+      ],
     ),
-    'total': A2uiSchemas.stringReference(),
+    'total': CommonSchemas.dynamicString,
   },
   required: ['items'],
+  // Accept properties this schema does not declare; the widget ignores them.
+  additionalProperties: true,
 );
 
-final cartSelectorItem = CatalogItem(
+final cartSelectorItem = ComponentImplementation(
   name: 'CartSelector',
-  dataSchema: _cartSelectorSchema,
-  widgetBuilder: (ctx) {
-    final data = ctx.data as Map<String, Object?>;
-    return BoundList(
-      dataContext: ctx.dataContext,
-      value: data['items'],
-      builder: (context, items) {
-        return BoundString(
-          dataContext: ctx.dataContext,
-          value: data['total'],
-          builder: (context, total) => _CartSelectorView(
-            items: _coerceItems(items),
-            total: total ?? r'$0.00',
-            onToggle: (id) => ctx.dispatchEvent(
-              UserActionEvent(
-                name: 'toggleCartItem',
-                sourceComponentId: ctx.id,
-                context: {'item_id': id},
-              ),
-            ),
-            onCheckout: () => ctx.dispatchEvent(
-              UserActionEvent(name: 'cartCheckout', sourceComponentId: ctx.id),
-            ),
-          ),
-        );
+  schema: _cartSelectorSchema,
+  builder: (context, node, props, buildChild) => _CartSelectorView(
+    items: _coerceItems(props.list('items')),
+    total: props.string('total') ?? r'$0.00',
+    onToggle: (id) => node.context?.dispatchAction({
+      'event': {
+        'name': 'toggleCartItem',
+        'context': {'item_id': id},
       },
-    );
-  },
+    }),
+    onCheckout: () => node.context?.dispatchAction({
+      'event': {'name': 'cartCheckout'},
+    }),
+  ),
 );
 
 /// Normalises the loosely-typed data-model list into typed cart rows.
